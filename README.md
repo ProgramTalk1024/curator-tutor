@@ -1013,7 +1013,7 @@ public class CacheTest {
 
 **结论：**修改监听节点以及其子节点都会触发`forChanges`、`forAll`、`forCreatesAndChanges`监听器。
 
-### ACL设置
+### ~~ACL设置~~
 
 命令行：
 
@@ -1288,3 +1288,6 @@ INFO ----------------------------------------
 
 
 
+---
+
+> Github：<font color="green">https://github.com/ProgramTalk1024/curator-tutor</font>
