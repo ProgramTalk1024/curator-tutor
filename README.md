@@ -902,7 +902,7 @@ public class CacheTest {
 
 上面的代码就是创建监听节点的核心代码。
 
-> 以前的监听类型是不同的类（过期的类）实现的。现在是通过不同的forXXX方法指定的（例如：`forInitialized`），接下来一一讲解并实战观测结果。
+> 以前的监听类型是不同的类（过期的类）实现的。现在是通过不同的forXXX方法指定的（例如：`forInitialized`）。
 
 **在测试前我将zk中的数据清理掉**
 
@@ -945,6 +945,8 @@ public class CacheTest {
 
 * `CuratorCacheListener`监听器类，里面可以定义各种监听器。
 
+## 测试
+
 ### 启动
 
 运行上面的示例，会打印如下内容：
@@ -967,7 +969,7 @@ public class CacheTest {
 
 我们看到当创建节点的时候有四个回调函数被执行。
 
-**结论：**当创建节点的时候`forCreates`、`forAll`、`forCreatesAndChanges`被回调。
+**结论：** 当创建节点的时候`forCreates`、`forAll`、`forCreatesAndChanges`被回调。
 
 那么如果再创建子节点情况会是什么样的呢？比如我创建`/ns1/sub1`。
 
@@ -985,7 +987,7 @@ public class CacheTest {
 
 节点创建监听器，监听类型是`CuratorCacheListener.Type.NODE_CREATED`，创建节点的时候会触发，当创建子节点的时候也会触发	。
 
-**结论：**创建子节点依然会回调上述所说的四个监听器。
+**结论：** 创建子节点依然会回调上述所说的四个监听器。
 
 ### 修改数据
 
@@ -1011,7 +1013,7 @@ public class CacheTest {
 
 依然回调`forChanges`、`forAll`、`forCreatesAndChanges`四个监听器函数。
 
-**结论：**修改监听节点以及其子节点都会触发`forChanges`、`forAll`、`forCreatesAndChanges`监听器。
+**结论：** 修改监听节点以及其子节点都会触发`forChanges`、`forAll`、`forCreatesAndChanges`监听器。
 
 ### ~~ACL设置~~
 
@@ -1023,7 +1025,7 @@ public class CacheTest {
 
 ![image-20230120190152818](https://itlab1024-1256529903.cos.ap-beijing.myqcloud.com/202301201901883.png)
 
-**结论：**设置ACL不会触发监听器。
+**结论：** 设置ACL不会触发监听器。
 
 ### 删除节点
 
@@ -1051,7 +1053,7 @@ public class CacheTest {
 
 跟上面子节点的删除触发的监听器回调一样！
 
-**总结：**删除监听根节点以及其子节点会触发`forDeletes`、`forAll`监听器。
+**总结：** 删除监听根节点以及其子节点会触发`forDeletes`、`forAll`监听器。
 
 那么如果我删除的是一个父级节点呢？会出现什么情况？
 
@@ -1071,7 +1073,7 @@ public class CacheTest {
 
 可以看到，级联删除，会多次触发`forDeletes`，根节点和其子节点的删除都会触发。同理`forAll`也会多次触发。
 
-**总结：**对于节点的删除，无论是单个删除还是级联删除，每个节点的删除都会触发`forDeletes`、`forAll`监听器。
+**总结：** 对于节点的删除，无论是单个删除还是级联删除，每个节点的删除都会触发`forDeletes`、`forAll`监听器。
 
 > 那么上面这些总结对吗？起码默认情况是对的！因为缓存我使用这样的方式创建的`CuratorCache curatorCache = CuratorCache.builder(curatorFramework, "/ns1").build();`
 
