@@ -800,7 +800,7 @@ public class TransactionTest{
 
 # 监听节点
 
-本版本中`PathChildrenCache`、`PathChildrenCacheMod`、`TreeCache`都已经是过期的了，官方推荐使用`CuratorCache`。
+本版本中`PathChildrenCache`、`NodeCache`、`TreeCache`都已经是过期的了，官方推荐使用`CuratorCache`。
 
 并且api风格也更改了，改为了流式风格。
 
@@ -1075,6 +1075,39 @@ public class CacheTest {
 
 > 那么上面这些总结对吗？起码默认情况是对的！因为缓存我使用这样的方式创建的`CuratorCache curatorCache = CuratorCache.builder(curatorFramework, "/ns1").build();`
 
+## CuratorCache配置
+
+上面的代码中我使用的`CuratorCache curatorCache = CuratorCache.builder(curatorFramework, "/ns1").build();`会导致子节点的操作也会触发监听器，这是因为默认就是如此，当然如果想值监听一个节点，可以使用如下方法（源码如下）：
+
+```java
+static CuratorCache build(CuratorFramework client, String path, Options... options)
+{
+    return builder(client, path).withOptions(options).build();
+}
+```
+
+第三个参数Options就可以配置。
+
+比如我配置就监听一个节点，就可以按照如下方式创建`CuratorCache `:
+
+```java
+CuratorCache curatorCache = CuratorCache.build(curatorFramework, "/ns1", CuratorCache.Options.SINGLE_NODE_CACHE);
+```
+
+这里我传递了第三个参数`CuratorCache.Options.SINGLE_NODE_CACHE`。也就实现了只监听`/ns1`节点的功能。
+
+**CuratorCache.Options.SINGLE_NODE_CACHE**：单节点缓存
+
+**CuratorCache.Options.COMPRESSED_DATA**：通过以下方式解压缩数据 org.apache.curator.framework.api.GetDataBuilder.decompressed()
+
+**CuratorCache.Options.DO_NOT_CLEAR_ON_CLOSE**：通常，当缓存通过 关闭 close()时，存储将通过 清除 CuratorCacheStorage.clear()。此选项可防止清除存储。
+
+使用`CuratorCache.builder(curatorFramework, "/ns1").build()`构建的时候，`CuratorCache.Options.SINGLE_NODE_CACHE=FALSE`、`CuratorCache.Options.COMPRESSED_DATA=FALAW`、`CuratorCache.Options.DO_NOT_CLEAR_ON_CLOSE=true`。
+
+通过Debug可以看到对应的配置如下：
+
+![image-20230124211120905](https://itlab1024-1256529903.cos.ap-beijing.myqcloud.com/202301242111149.png)
+
 ## 说明
 
 上面我使用了命令行搭配代码的方式大致测试了下监听器的类型。接下来详细说明下各种监听器的作用。
@@ -1103,11 +1136,155 @@ public class CacheTest {
 
 触发条件：上面的`forCreates`、`forChanges`、`forCreatesAndChanges`、`forDeletes`触发的时候都会同时触发`forAll`。
 
-### forNodeCache
+### forNodeCache、forTreeCache、forPathChildrenCache
 
-这是一种桥接监听器，它允许将旧式监听器`NodeCacheListener`（因为`NodeCache`类已经标记为弃用类）与`CuratorCache`重用
+这三个是一种桥接监听器，它允许将旧式监听器`PathChildrenCache`、`NodeCache`、`TreeCache`与`CuratorCache`重用，不过我觉得上面的那些监听器已经能够满足需求，无需使用这三个了。
 
-```shell
 
+
+>  <font color="red">**如果读者有不一样的间接，欢迎留言！！！**</font>
+
+
+
+```java
+@Test
+public void testCache2() throws Exception {
+    curatorFramework.start();
+    CuratorCache curatorCache = CuratorCache.bridgeBuilder(curatorFramework, "/ns1").build();
+    CuratorCacheListener curatorCacheListener = CuratorCacheListener.builder()
+        .forNodeCache(() -> {
+            log.info("forNodeCache回调");
+            log.info("----------------------------------------");
+        })
+        .forTreeCache(curatorFramework, (client, event) -> {
+            log.info("forTreeCache回调");
+            log.info("type=[{}], data=[{}], oldData=[{}]", event.getType(), event.getData(), event.getOldData());
+            log.info("----------------------------------------");
+        })
+        .forPathChildrenCache("/test", curatorFramework, (client, event) -> {
+            log.info("forPathChildrenCache回调");
+            log.info("type=[{}], data=[{}], InitialData=[{}]", event.getType(), event.getData(), event.getInitialData());
+            log.info("----------------------------------------");
+        })
+        .build();
+    // 获取监听器列表容器
+    Listenable<CuratorCacheListener> listenable = curatorCache.listenable();
+    // 将监听器放入容器中
+    listenable.addListener(curatorCacheListener);
+    // curatorCache必须启动
+    curatorCache.start();
+
+    TimeUnit.MILLISECONDS.sleep(500);
+    byte[] oldData = "A".getBytes(StandardCharsets.UTF_8);
+    byte[] newData = "B".getBytes(StandardCharsets.UTF_8);
+    // 创建根节点
+    curatorFramework.create().forPath("/ns1", oldData);
+    log.info("创建/ns1节点");
+    curatorFramework.create().forPath("/ns1/sub1", oldData);
+    log.info("创建/ns1/sub1节点");
+
+    // 修改根节点的值
+    curatorFramework.setData().forPath("/ns1", newData);
+    log.info("修改/ns1节点的值");
+    // 修改子节点的值
+    curatorFramework.setData().forPath("/ns1/sub1", newData);
+    log.info("修改/ns1/sub1节点的值");
+
+    // 删除子节点
+    curatorFramework.delete().forPath("/ns1/sub1");
+    log.info("删除/ns1/sub1节点");
+
+    // 删除根节点
+    curatorFramework.delete().forPath("/ns1");
+    log.info("删除/ns1节点");
+
+    curatorCache.close();
+}
 ```
+
+运行日志如下：
+
+```text
+INFO forTreeCache回调
+INFO type=[INITIALIZED], data=[null], oldData=[null]
+INFO ----------------------------------------
+INFO forPathChildrenCache回调
+INFO type=[INITIALIZED], data=[null], InitialData=[null]
+INFO ----------------------------------------
+INFO 创建/ns1节点
+INFO 创建/ns1/sub1节点
+INFO forNodeCache回调
+INFO ----------------------------------------
+INFO forTreeCache回调
+DEBUG Reading reply session id: 0x10001d2b6b70006, packet:: clientPath:/ns1/sub1 serverPath:/ns1/sub1 finished:false header:: 10,4  replyHeader:: 10,226,0  request:: '/ns1/sub1,F  response:: #41,s{226,226,1674566507592,1674566507592,0,0,0,0,1,0,226} 
+INFO type=[NODE_ADDED], data=[ChildData{path='/ns1', stat=225,225,1674566507586,1674566507586,0,1,0,0,1,1,226
+, data=[65]}], oldData=[null]
+INFO ----------------------------------------
+INFO forPathChildrenCache回调
+INFO type=[CHILD_ADDED], data=[ChildData{path='/ns1', stat=225,225,1674566507586,1674566507586,0,1,0,0,1,1,226
+, data=[65]}], InitialData=[null]
+INFO ----------------------------------------
+INFO forNodeCache回调
+INFO ----------------------------------------
+INFO forTreeCache回调
+INFO type=[NODE_ADDED], data=[ChildData{path='/ns1/sub1', stat=226,226,1674566507592,1674566507592,0,0,0,0,1,0,226
+, data=[65]}], oldData=[null]
+INFO ----------------------------------------
+INFO forPathChildrenCache回调
+INFO type=[CHILD_ADDED], data=[ChildData{path='/ns1/sub1', stat=226,226,1674566507592,1674566507592,0,0,0,0,1,0,226
+, data=[65]}], InitialData=[null]
+INFO ----------------------------------------
+INFO 修改/ns1节点的值
+INFO forNodeCache回调
+INFO ----------------------------------------
+INFO forTreeCache回调
+INFO type=[NODE_UPDATED], data=[ChildData{path='/ns1', stat=225,227,1674566507586,1674566507601,1,1,0,0,1,1,226
+, data=[66]}], oldData=[ChildData{path='/ns1', stat=225,225,1674566507586,1674566507586,0,1,0,0,1,1,226
+, data=[65]}]
+INFO ----------------------------------------
+INFO forPathChildrenCache回调
+INFO type=[CHILD_UPDATED], data=[ChildData{path='/ns1', stat=225,227,1674566507586,1674566507601,1,1,0,0,1,1,226
+, data=[66]}], InitialData=[null]
+INFO ----------------------------------------
+INFO 修改/ns1/sub1节点的值
+INFO forNodeCache回调
+INFO ----------------------------------------
+INFO forTreeCache回调
+INFO type=[NODE_UPDATED], data=[ChildData{path='/ns1/sub1', stat=226,228,1674566507592,1674566507605,1,0,0,0,1,0,226
+, data=[66]}], oldData=[ChildData{path='/ns1/sub1', stat=226,226,1674566507592,1674566507592,0,0,0,0,1,0,226
+, data=[65]}]
+INFO ----------------------------------------
+INFO forPathChildrenCache回调
+INFO type=[CHILD_UPDATED], data=[ChildData{path='/ns1/sub1', stat=226,228,1674566507592,1674566507605,1,0,0,0,1,0,226
+, data=[66]}], InitialData=[null]
+INFO ----------------------------------------
+INFO 删除/ns1/sub1节点
+INFO forNodeCache回调
+INFO ----------------------------------------
+INFO forTreeCache回调
+INFO type=[NODE_REMOVED], data=[ChildData{path='/ns1/sub1', stat=226,228,1674566507592,1674566507605,1,0,0,0,1,0,226
+, data=[66]}], oldData=[null]
+INFO ----------------------------------------
+INFO forPathChildrenCache回调
+INFO type=[CHILD_REMOVED], data=[ChildData{path='/ns1/sub1', stat=226,228,1674566507592,1674566507605,1,0,0,0,1,0,226
+, data=[66]}], InitialData=[null]
+INFO ----------------------------------------
+INFO forNodeCache回调
+INFO ----------------------------------------
+INFO forTreeCache回调
+INFO type=[NODE_REMOVED], data=[ChildData{path='/ns1', stat=225,227,1674566507586,1674566507601,1,1,0,0,1,1,226
+, data=[66]}], oldData=[null]
+INFO ----------------------------------------
+INFO forPathChildrenCache回调
+INFO 删除/ns1节点
+INFO type=[CHILD_REMOVED], data=[ChildData{path='/ns1', stat=225,227,1674566507586,1674566507601,1,1,0,0,1,1,226
+, data=[66]}], InitialData=[null]
+INFO ----------------------------------------
+```
+
+ 
+
+> <font color="red">**这里有个问题，`CuratorCache.bridgeBuilder(curatorFramework, "/ns1").build()`设置监听的是`/ns1`,后面又通过`.forPathChildrenCache("/test", curatorFramework, (client, event) -> {`设置了监听`/test`，那么到底监听哪个？从日志上看是监听了`/ns`，那为什么要设置`/test`，是API设计问题？还是我用错了？欢迎交流！！！**</font>
+
+
 

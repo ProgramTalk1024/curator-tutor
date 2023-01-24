@@ -104,10 +104,15 @@ public class CacheTest {
 
         curatorCache.close();
     }
+
+    /**
+     * 测试桥接
+     * @throws Exception
+     */
     @Test
     public void testCache2() throws Exception {
         curatorFramework.start();
-        CuratorCache curatorCache = CuratorCache.builder(curatorFramework, "/ns1").build();
+        CuratorCache curatorCache = CuratorCache.bridgeBuilder(curatorFramework, "/ns1").build();
         CuratorCacheListener curatorCacheListener = CuratorCacheListener.builder()
                 .forNodeCache(() -> {
                     log.info("forNodeCache回调");
@@ -130,8 +135,31 @@ public class CacheTest {
         listenable.addListener(curatorCacheListener);
         // curatorCache必须启动
         curatorCache.start();
-        // 延时，以保证连接不关闭
-        TimeUnit.DAYS.sleep(10);
+
+        TimeUnit.MILLISECONDS.sleep(500);
+        byte[] oldData = "A".getBytes(StandardCharsets.UTF_8);
+        byte[] newData = "B".getBytes(StandardCharsets.UTF_8);
+        // 创建根节点
+        curatorFramework.create().forPath("/ns1", oldData);
+        log.info("创建/ns1节点");
+        curatorFramework.create().forPath("/ns1/sub1", oldData);
+        log.info("创建/ns1/sub1节点");
+
+        // 修改根节点的值
+        curatorFramework.setData().forPath("/ns1", newData);
+        log.info("修改/ns1节点的值");
+        // 修改子节点的值
+        curatorFramework.setData().forPath("/ns1/sub1", newData);
+        log.info("修改/ns1/sub1节点的值");
+
+        // 删除子节点
+        curatorFramework.delete().forPath("/ns1/sub1");
+        log.info("删除/ns1/sub1节点");
+
+        // 删除根节点
+        curatorFramework.delete().forPath("/ns1");
+        log.info("删除/ns1节点");
+
         curatorCache.close();
     }
 }
