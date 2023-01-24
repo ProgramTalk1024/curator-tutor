@@ -154,8 +154,19 @@ public class RetryTest {
 session超时重试策略，其构造方法是`SessionFailedRetryPolicy(RetryPolicy delegatePolicy)`，参数就是也是一个重试策略，其含义就是说会话超时的时候使用哪种具体的重试策略。
 
 ```java
+public void testSessionFailedRetryPolicy() throws Exception {
+        RetryPolicy sessionFailedRetryPolicy = new SessionFailedRetryPolicy(new RetryForever(1000));
 
+        CuratorFramework curatorFramework = CuratorFrameworkFactory.builder()
+                .connectString("localhost:2181")
+                .retryPolicy(sessionFailedRetryPolicy)
+                .build();
+        curatorFramework.start();
+        TimeUnit.DAYS.sleep(1);
+    }
 ```
+session超时后，会尝试重新连接。
+![](https://itlab1024-1256529903.cos.ap-beijing.myqcloud.com/202301241657836.png)
 
 
 
@@ -182,6 +193,81 @@ public void testRetryNTimes() throws Exception {
 @Test
 public void testRetryOneTime() throws Exception {
     CuratorFramework curatorFramework = CuratorFrameworkFactory.newClient("unknownHost:2181", new RetryOneTime(1000));
+    curatorFramework.start();
+    TimeUnit.DAYS.sleep(1);
+}
+```
+
+
+
+## RetryUntilElapsed
+
+`public RetryUntilElapsed(int maxElapsedTimeMs, int sleepMsBetweenRetries)`
+
+一直重试直到达到规定的时间，`maxElapsedTimeMs`：最大重试时间，`sleepMsBetweenRetries`每次重试间隔时间。
+
+```java
+@Test
+public void testRetryUntilElapsed() throws Exception {
+    RetryUntilElapsed retryPolicy = new RetryUntilElapsed(3000, 1000);
+    CuratorFramework curatorFramework = CuratorFrameworkFactory.newClient("unknownHost:2181", retryPolicy);
+    curatorFramework.start();
+    TimeUnit.DAYS.sleep(1);
+}
+```
+
+
+
+## ExponentialBackoffRetry
+
+按照设定的次数重试，每次重试之间的睡眠时间都会增加。
+
+构造方法如下：
+
+```java
+public ExponentialBackoffRetry(int baseSleepTimeMs, int maxRetries)
+{
+    this(baseSleepTimeMs, maxRetries, DEFAULT_MAX_SLEEP_MS);
+}
+```
+
+`baseSleepTimeMs`：重试间隔毫秒数
+
+`maxRetries`：最大重试次数
+
+```java
+@Test
+public void testExponentialBackoffRetry() throws Exception {
+    RetryPolicy retryPolicy = new ExponentialBackoffRetry(3000, 1000);
+    CuratorFramework curatorFramework = CuratorFrameworkFactory.newClient("unknownHost:2181", retryPolicy);
+    curatorFramework.start();
+    TimeUnit.DAYS.sleep(1);
+}
+```
+
+## BoundedExponentialBackoffRetry
+
+重试策略，该策略重试设定的次数，重试之间的休眠时间增加（最多达到最大限制）
+
+`BoundedExponentialBackoffRetry`继承`ExponentialBackoffRetry`，相比与`ExponentialBackoffRetry`，它增加了最大休眠时间的设置。
+
+构造方法如下：
+
+```java
+public BoundedExponentialBackoffRetry(int baseSleepTimeMs, int maxSleepTimeMs, int maxRetries)
+{
+    super(baseSleepTimeMs, maxRetries);
+    this.maxSleepTimeMs = maxSleepTimeMs;
+}
+```
+
+示例如下：
+
+```java
+@Test
+public void testBoundedExponentialBackoffRetry() throws Exception {
+    RetryPolicy retryPolicy = new BoundedExponentialBackoffRetry(3000, 6000, 1000);
+    CuratorFramework curatorFramework = CuratorFrameworkFactory.newClient("unknownHost:2181", retryPolicy);
     curatorFramework.start();
     TimeUnit.DAYS.sleep(1);
 }
