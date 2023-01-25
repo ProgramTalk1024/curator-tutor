@@ -1296,9 +1296,197 @@ INFO ----------------------------------------
 
 ---
 
-## 分布式锁（Distributed Lock）
+# 分布式锁（Distributed Lock）
 
 使用ZK可以实现分布式锁功能。
+
+## InterProcessMutex
+
+### 基本说明
+
+全局同步的完全分布式锁，这意味着没有两个客户端可以同时持有相同的锁。
+
+其提供了如下构造方法
+
+```java
+public InterProcessMutex(CuratorFramework client, String path)
+{
+    this(client, path, new StandardLockInternalsDriver());
+}
+```
+
+这里有两个参数`client`：CuratorFramework客户端，`path`：zookeeper的node，抢锁路径，同一个锁path需一致。
+
+```java
+public void testLock1() throws Exception {
+    curatorFramework.start();
+    // 定义锁
+    InterProcessMutex lock = new InterProcessMutex(curatorFramework, "/program-talk-lock");
+    // 获取锁
+    lock.acquire();
+    log.info("此处是业务代码");
+    // 模拟业务执行30秒
+    TimeUnit.SECONDS.sleep(30);
+    // 释放锁
+    lock.release();
+}
+```
+
+某个时刻，查看Zk的节点，可以看到如下所示内容。
+
+![image-20230125194401502](https://itlab1024-1256529903.cos.ap-beijing.myqcloud.com/202301251944770.png)
+
+当执行完毕的时候，如果正常释放锁，则会清理到对应的信息。
+
+JavaDoc文档中其实有说跨JVM的锁，那么同一个JVM中多线程使用这个锁可以吗，可以!
+
+```java
+package cn.programtalk;
+
+import lombok.extern.slf4j.Slf4j;
+import org.apache.curator.RetryPolicy;
+import org.apache.curator.framework.CuratorFramework;
+import org.apache.curator.framework.CuratorFrameworkFactory;
+import org.apache.curator.framework.recipes.locks.InterProcessMutex;
+import org.apache.curator.retry.ExponentialBackoffRetry;
+
+import java.util.concurrent.TimeUnit;
+
+@Slf4j
+public class InterProcessMutexThreadTest implements Runnable {
+    String connectString = "localhost:2181";
+    RetryPolicy retryPolicy = new ExponentialBackoffRetry(1000, 3);
+
+
+    @Override
+    public void run() {
+        CuratorFramework curatorFramework = CuratorFrameworkFactory.newClient(connectString, retryPolicy);
+        curatorFramework.start();
+        // 定义锁
+        InterProcessMutex lock = new InterProcessMutex(curatorFramework, "/InterProcessMutex");
+        try {
+            lock.acquire();
+            String threadName = Thread.currentThread().getName();
+            log.info("{} ，执行业务代码开始", threadName);
+            TimeUnit.SECONDS.sleep(10);
+            log.info("{} ，执行业务代码完毕", threadName);
+        } catch (Exception e) {
+            e.printStackTrace();
+        } finally {
+            try {
+                lock.release();
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }
+    }
+
+    public static void main(String[] args) {
+        InterProcessMutexThreadTest task = new InterProcessMutexThreadTest();
+        Thread t1 = new Thread(task, "任务1");
+        Thread t2 = new Thread(task, "任务2");
+        t1.start();
+        t2.start();
+    }
+}
+```
+
+运行结果如下：
+
+```text
+INFO 任务1 ，执行业务代码开始
+DEBUG Reading reply session id: 0x100000022e20032, packet:: clientPath:null serverPath:null finished:false header:: 8,4  replyHeader:: 8,458,0  request:: '/InterProcessMutex/_c_4929b7d6-6c6b-4a9a-ae48-5315dc67523e-lock-0000000000,T  response:: #3139322e3136382e31302e31,s{457,457,1674654986411,1674654986411,0,0,0,72057594623164465,12,0,457} 
+INFO 任务1 ，执行业务代码完毕
+DEBUG Got notification session id: 0x100000022e20032
+DEBUG Reading reply session id: 0x100000022e20031, packet:: clientPath:null serverPath:null finished:false header:: 8,2  replyHeader:: 8,459,0  request:: '/InterProcessMutex/_c_4929b7d6-6c6b-4a9a-ae48-5315dc67523e-lock-0000000000,-1  response:: null
+DEBUG Got ping response for session id: 0x100000022e20031 after 5ms.
+DEBUG Got WatchedEvent state:SyncConnected type:NodeDeleted path:/InterProcessMutex/_c_4929b7d6-6c6b-4a9a-ae48-5315dc67523e-lock-0000000000 for session id 0x100000022e20032
+DEBUG Got ping response for session id: 0x100000022e20032 after 2ms.
+DEBUG Reading reply session id: 0x100000022e20032, packet:: clientPath:null serverPath:null finished:false header:: 9,12  replyHeader:: 9,459,0  request:: '/InterProcessMutex,F  response:: v{'_c_284a2de1-37d1-42c4-b818-3d2206a50c34-lock-0000000001},s{455,455,1674654986408,1674654986408,0,3,0,0,0,1,459} 
+INFO 任务2 ，执行业务代码开始
+INFO 任务2 ，执行业务代码完毕
+DEBUG Reading reply session id: 0x100000022e20032, packet:: clientPath:null serverPath:null finished:false header:: 10,2  replyHeader:: 10,460,0  request:: '/InterProcessMutex/_c_284a2de1-37d1-42c4-b818-3d2206a50c34-lock-0000000001,-1  response:: null
+DEBUG Got ping response for session id: 0x100000022e20032 after 7ms.
+Disconnected from the target VM, address: '127.0.0.1:58751', transport: 'socket'
+
+Process finished with exit code 0
+```
+
+可以看到两个任务是顺序执行的，不过单个JVM基本不使用分布式锁，JDK内置的锁即可!
+
+
+
+### 定义锁
+
+正如上面所说的那样，通过构造方法去定义一个可重入排它锁，`InterProcessMutex lock = new InterProcessMutex(curatorFramework, "/program-talk-lock");`。
+
+### 获取锁
+
+获取锁有两种方法，一种是使用上面所使用的`lock.acquire();`，这是个无参函数，他会一直尝试获取锁，如果获取不到则会一直阻塞。
+
+另外一种是使用`public boolean acquire(long time, TimeUnit unit) throws Exception`，不同于上面那个，这个不会一直阻塞，`time`是时间参数，`unit`是时间的单位。超过这个时间则会放弃获取锁。
+
+示例代码如下：
+
+```java
+ lock.acquire(10, TimeUnit.SECONDS);
+```
+
+此代码的意思就是如果在10秒内能获取到锁则返回`true`，超过10秒获取不到则返回`false`。不会一直阻塞。
+
+### 释放锁
+
+当程序执行完毕后必须释放锁，释放锁使用`release()`方法。
+
+## InterProcessSemaphoreMutex
+
+`InterProcessSemaphoreMutex`也是一个排它锁，不同于`InterProcessMutex`的是，`InterProcessSemaphoreMutex`不是一个可重入锁。
+
+代码示例：
+
+```java
+@Test
+public void testLock3() throws Exception {
+    curatorFramework.start();
+    // 定义锁
+    InterProcessLock lock = new InterProcessSemaphoreMutex(curatorFramework, "/InterProcessSemaphoreMutex");
+    // 获取锁
+    try {
+        boolean got = lock.acquire(30, TimeUnit.SECONDS);
+        if (got) {
+            log.info("此处是业务代码");
+            // 模拟业务执行30秒
+            TimeUnit.SECONDS.sleep(30);
+        } else {
+            log.warn("未获取到锁");
+        }
+    }catch (Exception e) {
+        e.printStackTrace();
+    }
+    finally {
+        // 释放锁
+        lock.release();
+    }
+}
+```
+
+某个时刻，查看Zk的节点，可以看到如下所示内容。
+
+
+
+![image-20230125204141295](https://itlab1024-1256529903.cos.ap-beijing.myqcloud.com/202301252041333.png)
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
