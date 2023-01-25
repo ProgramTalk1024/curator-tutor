@@ -5,6 +5,10 @@ Apache Curator 是 Apache ZooKeeper（分布式协调服务）的 Java/JVM 客�
 
 ![](https://itlab1024-1256529903.cos.ap-beijing.myqcloud.com/202301131005419.png)
 
+
+
+![img](https://itlab1024-1256529903.cos.ap-beijing.myqcloud.com/202301251038136.png)
+
 # 依赖
 curator 有很多的依赖，比如如下是maven依赖官方说明
 ![](https://itlab1024-1256529903.cos.ap-beijing.myqcloud.com/202301111130055.png)
@@ -1291,5 +1295,11 @@ INFO ----------------------------------------
 
 
 ---
+
+## 分布式锁（Distributed Lock）
+
+使用ZK可以实现分布式锁功能。
+
+
 
 > Github：<font color="green">https://github.com/ProgramTalk1024/curator-tutor</font>
