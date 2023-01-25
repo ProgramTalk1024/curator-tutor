@@ -1,4 +1,4 @@
-![](https://itlab1024-1256529903.cos.ap-beijing.myqcloud.com/202301241149793.png)
+![](https://itlab1024-1256529903.cos.ap-beijing.myqcloud.com/202301251143816.png)
 
 # Apache Curator Framework框架学习
 Apache Curator 是 Apache ZooKeeper（分布式协调服务）的 Java/JVM 客户端库。它包括一个高级API框架和实用程序，使使用Apache ZooKeeper变得更加容易和可靠。
