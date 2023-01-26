@@ -1438,9 +1438,65 @@ Process finished with exit code 0
 
 当程序执行完毕后必须释放锁，释放锁使用`release()`方法。
 
+### 可重入性
+
+```java
+package cn.programtalk;
+
+import lombok.extern.slf4j.Slf4j;
+import org.apache.curator.RetryPolicy;
+import org.apache.curator.framework.CuratorFramework;
+import org.apache.curator.framework.CuratorFrameworkFactory;
+import org.apache.curator.framework.recipes.locks.InterProcessMutex;
+import org.apache.curator.retry.ExponentialBackoffRetry;
+import org.junit.jupiter.api.Test;
+
+import java.util.concurrent.TimeUnit;
+
+/**
+ *  InterProcessMutex 锁的可重入性测试
+ */
+@Slf4j
+public class InterProcessMutexReentrantTest {
+    String connectString = "localhost:2181";
+    RetryPolicy retryPolicy = new ExponentialBackoffRetry(1000, 3);
+    CuratorFramework curatorFramework = CuratorFrameworkFactory.newClient(connectString, retryPolicy);
+    InterProcessMutex lock = new InterProcessMutex(curatorFramework, "/InterProcessMutexReentrantTest");
+    void a() throws Exception {
+        lock.acquire();
+        log.info("a方法执行");
+        b();
+        lock.release();
+    }
+    void b() throws Exception {
+        lock.acquire();
+        log.info("b方法执行");
+        lock.release();
+    }
+
+    @Test
+    public void test() throws Exception {
+        curatorFramework.start();
+        a();
+    }
+}
+```
+
+上面的代码中，a函数调用b函数，并且a和b都是用了同一个锁。执行结果如下:
+
+![image-20230126110754084](https://itlab1024-1256529903.cos.ap-beijing.myqcloud.com/202301261107184.png)
+
+程序正常执行，说明锁具备可重入性。
+
+
+
 ## InterProcessSemaphoreMutex
 
+### 基本说明
+
 `InterProcessSemaphoreMutex`也是一个排它锁，不同于`InterProcessMutex`的是，`InterProcessSemaphoreMutex`不是一个可重入锁。
+
+使用方法（定义锁、获取锁、释放锁）跟`InterProcessMutex`没有太大区别。
 
 代码示例：
 
@@ -1478,13 +1534,58 @@ public void testLock3() throws Exception {
 
 
 
+### 可重入性
+
+```java
+package cn.programtalk;
+
+import lombok.extern.slf4j.Slf4j;
+import org.apache.curator.RetryPolicy;
+import org.apache.curator.framework.CuratorFramework;
+import org.apache.curator.framework.CuratorFrameworkFactory;
+import org.apache.curator.framework.recipes.locks.InterProcessMutex;
+import org.apache.curator.framework.recipes.locks.InterProcessSemaphoreMutex;
+import org.apache.curator.retry.ExponentialBackoffRetry;
+import org.junit.jupiter.api.Test;
+
+/**
+ *  InterProcessSemaphoreMutex 锁的可重入性测试
+ */
+@Slf4j
+public class InterProcessSemaphoreMutexReentrantTest {
+    String connectString = "localhost:2181";
+    RetryPolicy retryPolicy = new ExponentialBackoffRetry(1000, 3);
+    CuratorFramework curatorFramework = CuratorFrameworkFactory.newClient(connectString, retryPolicy);
+    InterProcessSemaphoreMutex lock = new InterProcessSemaphoreMutex(curatorFramework, "/InterProcessSemaphoreMutex");
+    void a() throws Exception {
+        lock.acquire();
+        log.info("a方法执行");
+        b();
+        lock.release();
+    }
+    void b() throws Exception {
+        lock.acquire();
+        log.info("b方法执行");
+        lock.release();
+    }
+
+    @Test
+    public void test() throws Exception {
+        curatorFramework.start();
+        a();
+    }
+}
+```
+
+运行效果如下图：
+
+![image-20230126111311989](https://itlab1024-1256529903.cos.ap-beijing.myqcloud.com/202301261113118.png)
 
 
 
 
 
-
-
+不会正常执行完毕，会一直锁住，说明此锁不具备可重入性。
 
 
 
