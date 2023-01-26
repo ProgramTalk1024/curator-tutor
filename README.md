@@ -1300,7 +1300,7 @@ INFO ----------------------------------------
 
 使用ZK可以实现分布式锁功能。
 
-## InterProcessMutex
+## Shared Reentrant Lock（InterProcessMutex）
 
 ### 基本说明
 
@@ -1490,7 +1490,7 @@ public class InterProcessMutexReentrantTest {
 
 
 
-## InterProcessSemaphoreMutex
+## Shared Lock（InterProcessSemaphoreMutex）
 
 ### 基本说明
 
@@ -1586,6 +1586,28 @@ public class InterProcessSemaphoreMutexReentrantTest {
 
 
 不会正常执行完毕，会一直锁住，说明此锁不具备可重入性。
+
+## Shared Reentrant Read Write Lock（InterProcessReadWriteLock）
+
+`InterProcessReadWriteLock`是类似JDK的`ReentrantReadWriteLock`. 一个读写锁管理一对相关的锁。 一个负责读操作，另外一个负责写操作。 读操作在写锁没被使用时可同时由多个进程使用，而写锁使用时不允许读 (阻塞)。 此锁是可重入的。一个拥有写锁的线程可重入读锁，但是读锁却不能进入写锁。 这也意味着写锁可以降级成读锁， 比如请求写锁 —>读锁 —->释放写锁。 从读锁升级成写锁是不成的。
+
+读锁和写锁有如下关系：
+
+* 读写互斥
+
+* 写写互斥
+
+* 读读不互斥
+
+**重入性**
+
+读写锁是可以重入的，意味着你获取了一次读锁/写锁，那么你可以再次获取。但是要记得最后释放锁，获取了几次就得释放几次。
+
+
+
+
+
+
 
 
 
