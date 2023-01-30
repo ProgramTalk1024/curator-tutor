@@ -15,7 +15,7 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 public class CreateNodeTest {
-    String connectString = "172.20.98.4:2181";
+    String connectString = "localhost:2181";
     RetryPolicy retryPolicy = new ExponentialBackoffRetry(1000, 3);
 
     /**

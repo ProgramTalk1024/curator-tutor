@@ -1294,9 +1294,201 @@ INFO ----------------------------------------
 
 
 
----
 
-# 分布式锁（Distributed Lock）
+
+# 计数器
+
+## Shared Counter
+
+`ShareCount`是`curator`的一个共享计数器，所有监视同一路径的客户端都将具有共享整数的最新值（考虑到 ZK 的一致性保证）。
+
+![image-20230130134757766](https://itlab1024-1256529903.cos.ap-beijing.myqcloud.com/202301301347896.png)
+
+主要涉及三个类`ShareCount`、`SharedCountReader`， `SharedCountListener`。以下是基本使用方法
+
+```java
+package cn.programtalk;
+
+import lombok.extern.slf4j.Slf4j;
+import org.apache.curator.RetryPolicy;
+import org.apache.curator.framework.CuratorFramework;
+import org.apache.curator.framework.CuratorFrameworkFactory;
+import org.apache.curator.framework.recipes.shared.SharedCount;
+import org.apache.curator.framework.recipes.shared.SharedCountListener;
+import org.apache.curator.framework.recipes.shared.SharedCountReader;
+import org.apache.curator.framework.state.ConnectionState;
+import org.apache.curator.retry.ExponentialBackoffRetry;
+import org.junit.jupiter.api.Test;
+
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+@Slf4j
+public class ShareCountTest {
+    // 连接地址
+    public static final String CONNECT_STRING = "172.24.246.68:2181";
+
+    public static final RetryPolicy RETRY_POLICY = new ExponentialBackoffRetry(1000, 3);
+
+    private static final ExecutorService EXECUTOR_SERVICE = Executors.newCachedThreadPool();
+
+    @Test
+    public void testShareCount() throws Exception {
+        CuratorFramework curatorFramework = CuratorFrameworkFactory.newClient(CONNECT_STRING, RETRY_POLICY);
+        curatorFramework.start();
+        SharedCount sharedCount = new SharedCount(curatorFramework, "/ShareCount", 0);
+        sharedCount.start();
+        sharedCount.addListener(new SharedCountListener() {
+            @Override
+            public void countHasChanged(SharedCountReader sharedCountReader, int newCount) throws Exception {
+                log.info("countHasChanged callback");
+                log.info("newCount={}", newCount);
+            }
+
+            @Override
+            public void stateChanged(CuratorFramework client, ConnectionState newState) {
+
+            }
+        }, EXECUTOR_SERVICE);
+        sharedCount.setCount(1);
+        TimeUnit.DAYS.sleep(1);
+        sharedCount.close();
+    }
+}
+```
+
+运行结果：
+
+![image-20230130144955532](https://itlab1024-1256529903.cos.ap-beijing.myqcloud.com/202301301449669.png)
+
+
+
+成功获取到了监听的值。
+
+## Distributed Atomic Long
+
+尝试原子增量的计数器。它首先尝试使用乐观锁定。如果失败，则采用可选的 InterProcessMutex。对于乐观和互斥锁，使用重试策略重试增量。
+
+![image-20230130145355466](https://itlab1024-1256529903.cos.ap-beijing.myqcloud.com/202301301453597.png)
+
+有两个构造方法：
+
+`public DistributedAtomicLong(CuratorFramework client, String counterPath, RetryPolicy retryPolicy)`采用乐观模式。
+
+```java
+package cn.programtalk;
+
+import lombok.SneakyThrows;
+import lombok.extern.slf4j.Slf4j;
+import org.apache.curator.framework.CuratorFramework;
+import org.apache.curator.framework.CuratorFrameworkFactory;
+import org.apache.curator.framework.recipes.atomic.AtomicValue;
+import org.apache.curator.framework.recipes.atomic.DistributedAtomicLong;
+import org.apache.curator.retry.RetryForever;
+import org.junit.jupiter.api.Test;
+
+@Slf4j
+public class DistributedAtomicLongTest {
+    @SneakyThrows
+    @Test
+    public void testDistributedAtomicLong1() {
+        CuratorFramework curatorFramework = CuratorFrameworkFactory.newClient("172.24.246.68:2181", new RetryForever(1000));
+        curatorFramework.start();
+        DistributedAtomicLong distributedAtomicLong = new DistributedAtomicLong(curatorFramework, "/DistributedAtomicLong", new RetryForever(1000));
+        AtomicValue<Long> longAtomicValue = distributedAtomicLong.get();
+        log.info("1. preValue={}, postValue={}, succeeded={}", longAtomicValue.preValue(), longAtomicValue.postValue(), longAtomicValue.succeeded());
+        // 设置初始值，如果节点已经存在，则会返回false.
+        boolean succeed = distributedAtomicLong.initialize(0L);
+        log.info("initialize succeed? {}", succeed);
+        longAtomicValue = distributedAtomicLong.get();
+        log.info("2. preValue={}, postValue={}, succeeded={}", longAtomicValue.preValue(), longAtomicValue.postValue(), longAtomicValue.succeeded());
+        // add 将增量添加到当前值并返回新值信息。请记住始终检查 AtomicValue.succeeded().
+        distributedAtomicLong.add(10L);
+        longAtomicValue = distributedAtomicLong.get();
+        log.info("3. preValue={}, postValue={}, succeeded={}", longAtomicValue.preValue(), longAtomicValue.postValue(), longAtomicValue.succeeded());
+        // subtract 从当前值中减去增量并返回新值信息。请记住始终检查 AtomicValue.succeeded().
+        distributedAtomicLong.subtract(1L);
+        longAtomicValue = distributedAtomicLong.get();
+        log.info("4. preValue={}, postValue={}, succeeded={}", longAtomicValue.preValue(), longAtomicValue.postValue(), longAtomicValue.succeeded());
+        // increment 加一
+        distributedAtomicLong.increment();
+        longAtomicValue = distributedAtomicLong.get();
+        log.info("5. preValue={}, postValue={}, succeeded={}", longAtomicValue.preValue(), longAtomicValue.postValue(), longAtomicValue.succeeded());
+        // decrement 减一
+        distributedAtomicLong.decrement();
+        longAtomicValue = distributedAtomicLong.get();
+        log.info("6. preValue={}, postValue={}, succeeded={}", longAtomicValue.preValue(), longAtomicValue.postValue(), longAtomicValue.succeeded());
+    }
+}
+```
+
+运行结果：
+
+```text
+INFO 1. preValue=0, postValue=0, succeeded=true
+INFO initialize succeed? true
+INFO 2. preValue=0, postValue=0, succeeded=true
+INFO 3. preValue=10, postValue=10, succeeded=true
+INFO 4. preValue=9, postValue=9, succeeded=true
+INFO 5. preValue=10, postValue=10, succeeded=true
+INFO 6. preValue=9, postValue=9, succeeded=true
+```
+
+
+
+另外一个构造方法，提供类锁的模式，在互斥升级模式下创建。将首先使用给定的重试策略尝试乐观锁定。如果增量不成功， InterProcessMutex 将使用自己的重试策略尝试。
+
+```java
+@SneakyThrows
+@Test
+public void testDistributedAtomicLong2() {
+    CuratorFramework curatorFramework = CuratorFrameworkFactory.newClient("172.24.246.68:2181", new RetryForever(1000));
+    curatorFramework.start();
+    DistributedAtomicLong distributedAtomicLong;
+    distributedAtomicLong = new DistributedAtomicLong(curatorFramework, "/DistributedAtomicLong"
+                                                      , new RetryForever(1000)
+                                                      , PromotedToLock.builder().lockPath("/DistributedAtomicLongPromotedToLock").timeout(3000, TimeUnit.MILLISECONDS).retryPolicy(new RetryOneTime(1000)).build());
+    AtomicValue<Long> longAtomicValue = distributedAtomicLong.get();
+    log.info("1. preValue={}, postValue={}, succeeded={}", longAtomicValue.preValue(), longAtomicValue.postValue(), longAtomicValue.succeeded());
+    // 设置初始值，如果节点已经存在，则会返回false.
+    boolean succeed = distributedAtomicLong.initialize(0L);
+    log.info("initialize succeed? {}", succeed);
+    longAtomicValue = distributedAtomicLong.get();
+    log.info("2. preValue={}, postValue={}, succeeded={}", longAtomicValue.preValue(), longAtomicValue.postValue(), longAtomicValue.succeeded());
+    // add 将增量添加到当前值并返回新值信息。请记住始终检查 AtomicValue.succeeded().
+    distributedAtomicLong.add(10L);
+    longAtomicValue = distributedAtomicLong.get();
+    log.info("3. preValue={}, postValue={}, succeeded={}", longAtomicValue.preValue(), longAtomicValue.postValue(), longAtomicValue.succeeded());
+    // subtract 从当前值中减去增量并返回新值信息。请记住始终检查 AtomicValue.succeeded().
+    distributedAtomicLong.subtract(1L);
+    longAtomicValue = distributedAtomicLong.get();
+    log.info("4. preValue={}, postValue={}, succeeded={}", longAtomicValue.preValue(), longAtomicValue.postValue(), longAtomicValue.succeeded());
+    // increment 加一
+    distributedAtomicLong.increment();
+    longAtomicValue = distributedAtomicLong.get();
+    log.info("5. preValue={}, postValue={}, succeeded={}", longAtomicValue.preValue(), longAtomicValue.postValue(), longAtomicValue.succeeded());
+    // decrement 减一
+    distributedAtomicLong.decrement();
+    longAtomicValue = distributedAtomicLong.get();
+    log.info("6. preValue={}, postValue={}, succeeded={}", longAtomicValue.preValue(), longAtomicValue.postValue(), longAtomicValue.succeeded());
+}
+```
+
+运行结果：
+
+```text
+INFO 1. preValue=9, postValue=9, succeeded=true
+INFO initialize succeed? false
+INFO 2. preValue=9, postValue=9, succeeded=true
+INFO 3. preValue=19, postValue=19, succeeded=true
+INFO 4. preValue=18, postValue=18, succeeded=true
+INFO 5. preValue=19, postValue=19, succeeded=true
+INFO 6. preValue=18, postValue=18, succeeded=true
+```
+
+
+
+# 锁
 
 使用ZK可以实现分布式锁功能。
 
@@ -1589,6 +1781,8 @@ public class InterProcessSemaphoreMutexReentrantTest {
 
 ## Shared Reentrant Read Write Lock（InterProcessReadWriteLock）
 
+### 基本说明
+
 `InterProcessReadWriteLock`是类似JDK的`ReentrantReadWriteLock`. 一个读写锁管理一对相关的锁。 一个负责读操作，另外一个负责写操作。 读操作在写锁没被使用时可同时由多个进程使用，而写锁使用时不允许读 (阻塞)。 此锁是可重入的。一个拥有写锁的线程可重入读锁，但是读锁却不能进入写锁。 这也意味着写锁可以降级成读锁， 比如请求写锁 —>读锁 —->释放写锁。 从读锁升级成写锁是不成的。
 
 读锁和写锁有如下关系：
@@ -1602,6 +1796,363 @@ public class InterProcessSemaphoreMutexReentrantTest {
 **重入性**
 
 读写锁是可以重入的，意味着你获取了一次读锁/写锁，那么你可以再次获取。但是要记得最后释放锁，获取了几次就得释放几次。
+
+### 定义锁
+
+```java
+// 定义读锁
+InterProcessReadWriteLock lock  = new InterProcessReadWriteLock(curatorFramework, "/InterProcessReadWriteLock");
+```
+
+### 获取锁
+
+```java
+InterProcessReadWriteLock lock  = new InterProcessReadWriteLock(curatorFramework, "/InterProcessReadWriteLock");
+// 获取读锁
+InterProcessReadWriteLock.ReadLock readLock = lock.readLock();
+// 获取写锁
+InterProcessReadWriteLock.WriteLock writeLock = lock.writeLock();
+```
+
+### 释放锁
+
+同样使用`release()`释放锁
+
+```java
+writeLock.release();
+readLock.release();
+```
+
+### 测试
+
+**读写互斥**
+
+读写互斥就是说，当写的时候（写锁没有释放的时候，无法读取）。
+
+```java
+package cn.programtalk;
+
+import lombok.extern.slf4j.Slf4j;
+import org.apache.curator.RetryPolicy;
+import org.apache.curator.framework.CuratorFramework;
+import org.apache.curator.framework.CuratorFrameworkFactory;
+import org.apache.curator.framework.recipes.locks.InterProcessReadWriteLock;
+import org.apache.curator.retry.ExponentialBackoffRetry;
+import org.apache.curator.retry.RetryForever;
+import org.junit.jupiter.api.Test;
+
+import java.util.concurrent.TimeUnit;
+
+@Slf4j
+public class InterProcessReadWriteLockTest {
+    String connectString = "172.24.246.68:2181";
+    RetryPolicy retryPolicy = new RetryForever(1000);
+
+    @Test
+    public void testRead() throws Exception {
+        CuratorFramework curatorFramework = CuratorFrameworkFactory.newClient(connectString, retryPolicy);
+        curatorFramework.start();
+        InterProcessReadWriteLock lock  = new InterProcessReadWriteLock(curatorFramework, "/InterProcessReadWriteLock");
+        InterProcessReadWriteLock.ReadLock readLock = lock.readLock();
+        readLock.acquire();
+        log.info("读成功");
+        readLock.release();
+    }
+
+    @Test
+    public void testWrite() throws Exception {
+        CuratorFramework curatorFramework = CuratorFrameworkFactory.newClient(connectString, retryPolicy);
+        curatorFramework.start();
+        InterProcessReadWriteLock lock  = new InterProcessReadWriteLock(curatorFramework, "/InterProcessReadWriteLock");
+        InterProcessReadWriteLock.WriteLock writeLock = lock.writeLock();
+        writeLock.acquire();
+        TimeUnit.SECONDS.sleep(30);
+        log.info("写成功");
+        writeLock.release();
+    }
+}
+```
+
+`testRead`方法是读，`testWrite`方法是写，`testWrite`我休眠了30秒，主要是为了锁释放慢一点，来测试是否可读。
+
+首先运行`testWrite`，然后运行`testRead`（不到超过30后再运行，为了保证此时写锁并没有释放）。
+
+在读锁没有释放之前，运行效果图如下：
+
+![image-20230130102133560](https://itlab1024-1256529903.cos.ap-beijing.myqcloud.com/202301301021689.png)
+
+
+
+![image-20230130102146330](https://itlab1024-1256529903.cos.ap-beijing.myqcloud.com/202301301021435.png)
+
+
+
+可以看到读也阻塞着，等待一段时间后，写锁释放，读也就不会继续阻塞，运行完毕。
+
+
+
+![image-20230130102336466](https://itlab1024-1256529903.cos.ap-beijing.myqcloud.com/202301301023576.png)
+
+
+
+![image-20230130102305928](https://itlab1024-1256529903.cos.ap-beijing.myqcloud.com/202301301023032.png)
+
+
+
+**写写互斥**
+
+运行两次`testWrite`方法，要保证多实例运行。idea需要设置。按照下图设置。
+
+![image-20230130102535158](https://itlab1024-1256529903.cos.ap-beijing.myqcloud.com/202301301025289.png)
+
+
+
+接下来运行`testWrite`方法。
+
+![image-20230130102724844](https://itlab1024-1256529903.cos.ap-beijing.myqcloud.com/202301301027929.png)
+
+
+
+![image-20230130102744697](https://itlab1024-1256529903.cos.ap-beijing.myqcloud.com/202301301027801.png)
+
+
+
+第一个没运行完，第二个也会阻塞。
+
+
+
+**读读不互斥**
+
+我就不具体测试了，道理一样。
+
+**可重入性**
+
+```java
+public void testWrite() throws Exception {
+    CuratorFramework curatorFramework = CuratorFrameworkFactory.newClient(connectString, retryPolicy);
+    curatorFramework.start();
+    InterProcessReadWriteLock lock  = new InterProcessReadWriteLock(curatorFramework, "/InterProcessReadWriteLock");
+    InterProcessReadWriteLock.WriteLock writeLock = lock.writeLock();
+    writeLock.acquire();
+    writeLock.acquire();
+    log.info("写成功");
+    writeLock.release();
+    writeLock.release();
+}
+```
+
+程序能够正常执行完毕，说明具备可重入性。
+
+
+
+### 使用场景
+
+分布式读写锁适用于读多写少的情况。
+
+
+
+## Multi Shared Lock（InterProcessMultiLock）
+
+### 基本说明
+
+`InterProcessMultiLock`是多锁的意思，相当于一个容器，包含了多个锁。统一管理，一起获取锁，一起释放锁。
+
+![image-20230130103843996](https://itlab1024-1256529903.cos.ap-beijing.myqcloud.com/202301301038109.png)
+
+### 定义锁
+
+他有两个构造方法。
+
+`InterProcessMultiLock(CuratorFramework, List<String>)`创造的是一个`InterProcessMutex`的锁。
+
+```
+package cn.programtalk;
+
+import lombok.extern.slf4j.Slf4j;
+import org.apache.curator.RetryPolicy;
+import org.apache.curator.framework.CuratorFramework;
+import org.apache.curator.framework.CuratorFrameworkFactory;
+import org.apache.curator.framework.recipes.locks.InterProcessMultiLock;
+import org.apache.curator.framework.recipes.locks.InterProcessReadWriteLock;
+import org.apache.curator.retry.RetryForever;
+import org.junit.jupiter.api.Test;
+
+import java.util.List;
+
+@Slf4j
+public class InterProcessMultiLockTest {
+    String connectString = "172.24.246.68:2181";
+    RetryPolicy retryPolicy = new RetryForever(1000);
+
+    @Test
+    public void testInterProcessMultiLock1() throws Exception {
+        CuratorFramework curatorFramework = CuratorFrameworkFactory.newClient(connectString, retryPolicy);
+        curatorFramework.start();
+        InterProcessMultiLock lock  = new InterProcessMultiLock(curatorFramework, List.of("/InterProcessMultiLock1", "/InterProcessMultiLock2"));
+        lock.acquire();
+        log.info("读成功");
+        lock.release();
+    }
+}
+```
+
+运行后，从命令行看：
+
+![image-20230130104415814](https://itlab1024-1256529903.cos.ap-beijing.myqcloud.com/202301301044896.png)
+
+创建了两个节点。
+
+
+
+两外一个构造方法是`InterProcessMultiLock(List<InterProcessLock> locks)`，它则允许任何实现`InterProcessLock`的锁。
+
+```java
+@Test
+public void testInterProcessMultiLock2() throws Exception {
+    CuratorFramework curatorFramework = CuratorFrameworkFactory.newClient(connectString, retryPolicy);
+    curatorFramework.start();
+    List<InterProcessLock> mutexes = Lists.newArrayList();
+    InterProcessMutex interProcessMutex = new InterProcessMutex(curatorFramework, "/InterProcessMultiLock3");
+    mutexes.add(interProcessMutex);
+    InterProcessSemaphoreMutex interProcessSemaphoreMutex = new InterProcessSemaphoreMutex(curatorFramework, "/InterProcessMultiLock4");
+    mutexes.add(interProcessSemaphoreMutex);
+
+    InterProcessMultiLock lock  = new InterProcessMultiLock(mutexes);
+    lock.acquire();
+    log.info("读成功");
+    lock.release();
+}
+```
+
+运行结果：命令行查看。
+
+![image-20230130105407474](https://itlab1024-1256529903.cos.ap-beijing.myqcloud.com/202301301054553.png)
+
+
+
+## Shared Semaphore（InterProcessSemaphoreV2）
+
+`InterProcessSemaphoreV2`是一个信号量，跨JVM工作，多个客户端使用通过一个path则会统一受到进程间租约限制。这个信号量是公平的，会按照顺序获得租约。
+
+直白点说：`InterProcessSemaphoreV2`就类似JDK中的`Semaphore`，`Semaphore`用于控制进入临界区的线程数，而`InterProcessSemaphoreV2`是跨JVM的而已。
+
+![image-20230130153513493](https://itlab1024-1256529903.cos.ap-beijing.myqcloud.com/202301301535640.png)
+
+有两个构造方法：
+
+```java
+// 最大租约是由给定路径的用户维护的约定。
+public InterProcessSemaphoreV2(CuratorFramework client, String path, int maxLeases)
+// SharedCountReader 用作给定路径的信号量的方法，以确定最大租约。
+public InterProcessSemaphoreV2(CuratorFramework client, String path, SharedCountReader count)
+```
+
+
+
+```java
+package cn.programtalk;
+
+import lombok.extern.slf4j.Slf4j;
+import org.apache.curator.RetryPolicy;
+import org.apache.curator.framework.CuratorFramework;
+import org.apache.curator.framework.CuratorFrameworkFactory;
+import org.apache.curator.framework.recipes.locks.InterProcessSemaphoreV2;
+import org.apache.curator.framework.recipes.locks.Lease;
+import org.apache.curator.framework.recipes.shared.SharedCount;
+import org.apache.curator.retry.RetryForever;
+import org.junit.jupiter.api.Test;
+
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+
+@Slf4j
+public class InterProcessSemaphoreV2Test {
+    static String connectString = "172.24.246.68:2181";
+    static RetryPolicy retryPolicy = new RetryForever(10000);
+
+    @Test
+    public void testInterProcessSemaphoreV21() {
+        ExecutorService executor = Executors.newCachedThreadPool();
+        for (int i = 0; i < 10; i++) {
+            executor.submit(new Thread(new Task()));
+        }
+        while (true) {
+        }
+    }
+
+    @Test
+    public void testInterProcessSemaphoreV22() {
+        ExecutorService executor = Executors.newCachedThreadPool();
+        for (int i = 0; i < 10; i++) {
+            executor.submit(new Thread(new Task2()));
+        }
+        while (true) {
+        }
+    }
+
+    static class Task implements Runnable {
+        @Override
+        public void run() {
+            CuratorFramework curatorFramework = CuratorFrameworkFactory.newClient(connectString, retryPolicy);
+            curatorFramework.start();
+            InterProcessSemaphoreV2 interProcessSemaphoreV2 = new InterProcessSemaphoreV2(curatorFramework, "/InterProcessSemaphoreV2", 3);
+            Lease lease = null;
+            try {
+                lease = interProcessSemaphoreV2.acquire();
+                log.info("{} 获取到租约", Thread.currentThread().getName());
+                TimeUnit.MILLISECONDS.sleep(200);
+            } catch (Exception e) {
+                e.printStackTrace();
+            } finally {
+                interProcessSemaphoreV2.returnLease(lease);
+                log.info("{} 释放掉租约", Thread.currentThread().getName());
+            }
+        }
+    }
+
+    static class Task2 implements Runnable {
+        @Override
+        public void run() {
+            CuratorFramework curatorFramework = CuratorFrameworkFactory.newClient(connectString, retryPolicy);
+            curatorFramework.start();
+            InterProcessSemaphoreV2 interProcessSemaphoreV2 = new InterProcessSemaphoreV2(curatorFramework, "/InterProcessSemaphoreV2", new SharedCount(curatorFramework, "/InterProcessSemaphoreV2-SharedCount", 3));
+            Lease lease = null;
+            try {
+                lease = interProcessSemaphoreV2.acquire();
+                log.info("{} 获取到租约", Thread.currentThread().getName());
+                TimeUnit.MILLISECONDS.sleep(200);
+            } catch (Exception e) {
+                e.printStackTrace();
+            } finally {
+                interProcessSemaphoreV2.returnLease(lease);
+                log.info("{} 释放掉租约", Thread.currentThread().getName());
+            }
+        }
+    }
+}
+```
+
+
+
+`testInterProcessSemaphoreV21`搭配Task任务，实现的是`public InterProcessSemaphoreV2(CuratorFramework client, String path, int maxLeases)`构造方法定义的实例。
+
+运行截图：
+
+![image-20230130175241912](https://itlab1024-1256529903.cos.ap-beijing.myqcloud.com/202301301752058.png)
+
+
+
+从图上可知，线程9、3、2获取到了租约（凭证），之后9释放了租约（凭证），此时空闲一个租约（凭证），然后线程3就又获得了，以此类推，总之，同时获得租约（凭证）的线程**只有三个**！！！
+
+---
+
+`testInterProcessSemaphoreV22`搭配Task2任务，实现的是`public InterProcessSemaphoreV2(CuratorFramework client, String path, SharedCountReader count)`构造方法定义的实例。
+
+运行结果跟上面类似。
+
+
+
 
 
 
