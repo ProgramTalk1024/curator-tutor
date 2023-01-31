@@ -2032,6 +2032,8 @@ public void testInterProcessMultiLock2() throws Exception {
 
 ## Shared Semaphore（InterProcessSemaphoreV2）
 
+### 基本说明
+
 `InterProcessSemaphoreV2`是一个信号量，跨JVM工作，多个客户端使用通过一个path则会统一受到进程间租约限制。这个信号量是公平的，会按照顺序获得租约。
 
 直白点说：`InterProcessSemaphoreV2`就类似JDK中的`Semaphore`，`Semaphore`用于控制进入临界区的线程数，而`InterProcessSemaphoreV2`是跨JVM的而已。
@@ -2046,6 +2048,34 @@ public InterProcessSemaphoreV2(CuratorFramework client, String path, int maxLeas
 // SharedCountReader 用作给定路径的信号量的方法，以确定最大租约。
 public InterProcessSemaphoreV2(CuratorFramework client, String path, SharedCountReader count)
 ```
+
+第一个我们就叫做`INT类型构造方法`，第二个叫做`SharedCountReader类型构造方法`。他们是有区别的，接下来我通过图片加描述的方式来说明下:
+
+这两个构造方法的主要区别在第三个参数上，前者是`int`类型，后者是`SharedCountReader`类型，也就是说前者不是分布式共享的数，后者是共享的。
+
+**`INT类型构造方法`**
+
+![int](https://itlab1024-1256529903.cos.ap-beijing.myqcloud.com/202301311108133.png)
+
+`INT类型构造方法`的`maxLeases`参数是用户传递进入构造方法中的，也就是说在JVM中直接设置，那么就有可能出现在JVM1中设置的是2，在JVM2中设置的是3，并且Curator明确说明不会检查，这就可能出现，两个JVM中最大规约不一致导致出现问题。所以使用者必须保证设置相同。
+
+
+
+**`SharedCountReader类型构造方法`**
+
+![ShareCountReader](https://itlab1024-1256529903.cos.ap-beijing.myqcloud.com/202301311109990.png)
+
+
+
+`SharedCountReader类型构造方法`不是直接设置，而是区Zookeeper中去获取（相当多个JVM有相同的租约存储地址），然后加载设置到JVM中。并且该种方式会有`SharedCount`的监听器。
+
+
+
+两者实现的功能是一样的，也都跨JVM！！！
+
+
+
+### 代码示例
 
 
 
@@ -2062,72 +2092,52 @@ import org.apache.curator.framework.recipes.shared.SharedCount;
 import org.apache.curator.retry.RetryForever;
 import org.junit.jupiter.api.Test;
 
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
-
 @Slf4j
 public class InterProcessSemaphoreV2Test {
     static String connectString = "172.24.246.68:2181";
     static RetryPolicy retryPolicy = new RetryForever(10000);
 
     @Test
-    public void testInterProcessSemaphoreV21() {
-        ExecutorService executor = Executors.newCachedThreadPool();
-        for (int i = 0; i < 10; i++) {
-            executor.submit(new Thread(new Task()));
+    public void testInterProcessSemaphoreV21() throws Exception {
+        CuratorFramework curatorFramework = CuratorFrameworkFactory.newClient(connectString, retryPolicy);
+        curatorFramework.start();
+        InterProcessSemaphoreV2 interProcessSemaphoreV2 = new InterProcessSemaphoreV2(curatorFramework, "/InterProcessSemaphoreV21", 3);
+        Lease lease = null;
+        try {
+            lease = interProcessSemaphoreV2.acquire();
+            log.info("{} 获取到租约", Thread.currentThread().getName());
+        } catch (Exception e) {
+            e.printStackTrace();
+        } finally {
+            // 为了测试租约等待情况，我不释放租约
+            //interProcessSemaphoreV2.returnLease(lease);
+            //log.info("{} 释放掉租约", Thread.currentThread().getName());
         }
         while (true) {
+
         }
     }
 
     @Test
-    public void testInterProcessSemaphoreV22() {
-        ExecutorService executor = Executors.newCachedThreadPool();
-        for (int i = 0; i < 10; i++) {
-            executor.submit(new Thread(new Task2()));
+    public void testInterProcessSemaphoreV22() throws Exception {
+        CuratorFramework curatorFramework = CuratorFrameworkFactory.newClient(connectString, retryPolicy);
+        curatorFramework.start();
+        SharedCount sharedCount = new SharedCount(curatorFramework, "/InterProcessSemaphoreV22_SharedCount", 3);
+        sharedCount.start();
+        InterProcessSemaphoreV2 interProcessSemaphoreV2 = new InterProcessSemaphoreV2(curatorFramework, "/InterProcessSemaphoreV22", sharedCount);
+        Lease lease = null;
+        try {
+            lease = interProcessSemaphoreV2.acquire();
+            log.info("{} 获取到租约", Thread.currentThread().getName());
+        } catch (Exception e) {
+            e.printStackTrace();
+        } finally {
+            // 为了测试租约等待情况，我不释放租约
+            //interProcessSemaphoreV2.returnLease(lease);
+            //log.info("{} 释放掉租约", Thread.currentThread().getName());
         }
         while (true) {
-        }
-    }
 
-    static class Task implements Runnable {
-        @Override
-        public void run() {
-            CuratorFramework curatorFramework = CuratorFrameworkFactory.newClient(connectString, retryPolicy);
-            curatorFramework.start();
-            InterProcessSemaphoreV2 interProcessSemaphoreV2 = new InterProcessSemaphoreV2(curatorFramework, "/InterProcessSemaphoreV2", 3);
-            Lease lease = null;
-            try {
-                lease = interProcessSemaphoreV2.acquire();
-                log.info("{} 获取到租约", Thread.currentThread().getName());
-                TimeUnit.MILLISECONDS.sleep(200);
-            } catch (Exception e) {
-                e.printStackTrace();
-            } finally {
-                interProcessSemaphoreV2.returnLease(lease);
-                log.info("{} 释放掉租约", Thread.currentThread().getName());
-            }
-        }
-    }
-
-    static class Task2 implements Runnable {
-        @Override
-        public void run() {
-            CuratorFramework curatorFramework = CuratorFrameworkFactory.newClient(connectString, retryPolicy);
-            curatorFramework.start();
-            InterProcessSemaphoreV2 interProcessSemaphoreV2 = new InterProcessSemaphoreV2(curatorFramework, "/InterProcessSemaphoreV2", new SharedCount(curatorFramework, "/InterProcessSemaphoreV2-SharedCount", 3));
-            Lease lease = null;
-            try {
-                lease = interProcessSemaphoreV2.acquire();
-                log.info("{} 获取到租约", Thread.currentThread().getName());
-                TimeUnit.MILLISECONDS.sleep(200);
-            } catch (Exception e) {
-                e.printStackTrace();
-            } finally {
-                interProcessSemaphoreV2.returnLease(lease);
-                log.info("{} 释放掉租约", Thread.currentThread().getName());
-            }
         }
     }
 }
@@ -2135,23 +2145,39 @@ public class InterProcessSemaphoreV2Test {
 
 
 
-`testInterProcessSemaphoreV21`搭配Task任务，实现的是`public InterProcessSemaphoreV2(CuratorFramework client, String path, int maxLeases)`构造方法定义的实例。
+`testInterProcessSemaphoreV21`方法，使用的是`INT类型构造方法`，`testInterProcessSemaphoreV22`使用的是`SharedCountReader类型构造方法`。
 
-运行截图：
+因为两者功能一样，我就使用`testInterProcessSemaphoreV22`进行测试。
 
-![image-20230130175241912](https://itlab1024-1256529903.cos.ap-beijing.myqcloud.com/202301301752058.png)
+使用IDEA运行`testInterProcessSemaphoreV22`（多实例运行）四次。
 
+截图如下：
 
+第一次：
 
-从图上可知，线程9、3、2获取到了租约（凭证），之后9释放了租约（凭证），此时空闲一个租约（凭证），然后线程3就又获得了，以此类推，总之，同时获得租约（凭证）的线程**只有三个**！！！
-
----
-
-`testInterProcessSemaphoreV22`搭配Task2任务，实现的是`public InterProcessSemaphoreV2(CuratorFramework client, String path, SharedCountReader count)`构造方法定义的实例。
-
-运行结果跟上面类似。
+![第一次](https://itlab1024-1256529903.cos.ap-beijing.myqcloud.com/202301311016988.png)
 
 
+
+第二次：
+
+![第二次](https://itlab1024-1256529903.cos.ap-beijing.myqcloud.com/202301311016004.png)
+
+
+
+第三次：
+
+![image-20230131101735976](https://itlab1024-1256529903.cos.ap-beijing.myqcloud.com/202301311017111.png)
+
+
+
+第四次：
+
+![image-20230131101858724](https://itlab1024-1256529903.cos.ap-beijing.myqcloud.com/202301311018865.png)
+
+
+
+前三次都能够正常执行（正常打印），第四次次一直在等待获取租约，没有问题，因为我信号量设置的最大租约就是3！。
 
 
 
