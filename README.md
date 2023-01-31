@@ -2181,11 +2181,233 @@ public class InterProcessSemaphoreV2Test {
 
 
 
+# 屏障（**Barriers**）
 
 
 
+## Barrier
+
+`DistributedBarrier`分布式系统使用屏障来阻止一组节点的处理，直到满足允许所有节点继续的条件为止。
+
+![image-20230131112507534](https://itlab1024-1256529903.cos.ap-beijing.myqcloud.com/202301311125655.png)
+
+### 创建屏障
+
+`DistributedBarrier`提供了一个构造方法。
+
+![image-20230131145040885](https://itlab1024-1256529903.cos.ap-beijing.myqcloud.com/202301311450042.png)
 
 
+
+使用者通过构造方法直接`new`即可。
+
+![image-20230131145322159](https://itlab1024-1256529903.cos.ap-beijing.myqcloud.com/202301311453315.png)
+
+
+
+### 设置屏障
+
+![image-20230131145414174](https://itlab1024-1256529903.cos.ap-beijing.myqcloud.com/202301311454286.png)
+
+### 解除屏障
+
+![image-20230131145524431](https://itlab1024-1256529903.cos.ap-beijing.myqcloud.com/202301311455578.png)
+
+### 代码示例
+
+```java
+package cn.programtalk;
+
+import lombok.extern.slf4j.Slf4j;
+import org.apache.curator.framework.CuratorFramework;
+import org.apache.curator.framework.CuratorFrameworkFactory;
+import org.apache.curator.framework.recipes.barriers.DistributedBarrier;
+import org.apache.curator.retry.RetryForever;
+import org.junit.jupiter.api.Test;
+
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+
+@Slf4j
+public class DistributedBarrierTest {
+    @Test
+    public void testDistributedBarrier() throws Exception {
+        CuratorFramework curatorFramework = CuratorFrameworkFactory.newClient("172.24.246.68:2181", new RetryForever(1000));
+        curatorFramework.start();
+        // 创建DistributedBarrier
+        DistributedBarrier distributedBarrier = new DistributedBarrier(curatorFramework, "/DistributedBarrier");
+        // setBarrier的功能是创建path
+        distributedBarrier.setBarrier();
+        ExecutorService executorService = Executors.newCachedThreadPool();
+        for (int i = 0; i < 10; i++) {
+            executorService.submit(() -> {
+                try {
+                    String threadName = Thread.currentThread().getName();
+                    log.info("{}线程设置屏障", threadName);
+                    distributedBarrier.waitOnBarrier();
+                    log.info("屏障被移除，{}线程继续执行", threadName);
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            });
+        }
+        TimeUnit.SECONDS.sleep(5);
+        log.info(">>移除屏障<<");
+        distributedBarrier.removeBarrier();
+        while (true){
+
+        }
+    }
+}
+```
+
+运行结果：
+
+```text
+
+2023-01-31 14:49:05 [pool-4-thread-7] INFO cn.programtalk.DistributedBarrierTest - pool-4-thread-7线程设置屏障
+2023-01-31 14:49:05 [pool-4-thread-5] INFO cn.programtalk.DistributedBarrierTest - pool-4-thread-5线程设置屏障
+2023-01-31 14:49:05 [pool-4-thread-1] INFO cn.programtalk.DistributedBarrierTest - pool-4-thread-1线程设置屏障
+2023-01-31 14:49:05 [pool-4-thread-8] INFO cn.programtalk.DistributedBarrierTest - pool-4-thread-8线程设置屏障
+2023-01-31 14:49:05 [pool-4-thread-10] INFO cn.programtalk.DistributedBarrierTest - pool-4-thread-10线程设置屏障
+2023-01-31 14:49:05 [pool-4-thread-9] INFO cn.programtalk.DistributedBarrierTest - pool-4-thread-9线程设置屏障
+2023-01-31 14:49:05 [pool-4-thread-3] INFO cn.programtalk.DistributedBarrierTest - pool-4-thread-3线程设置屏障
+2023-01-31 14:49:05 [pool-4-thread-2] INFO cn.programtalk.DistributedBarrierTest - pool-4-thread-2线程设置屏障
+2023-01-31 14:49:05 [pool-4-thread-6] INFO cn.programtalk.DistributedBarrierTest - pool-4-thread-6线程设置屏障
+2023-01-31 14:49:05 [pool-4-thread-4] INFO cn.programtalk.DistributedBarrierTest - pool-4-thread-4线程设置屏障
+2023-01-31 14:49:10 [main] INFO cn.programtalk.DistributedBarrierTest - >>移除屏障<<
+2023-01-31 14:49:19 [pool-4-thread-7] INFO cn.programtalk.DistributedBarrierTest - 屏障被移除，pool-4-thread-7线程继续执行
+2023-01-31 14:49:20 [pool-4-thread-5] INFO cn.programtalk.DistributedBarrierTest - 屏障被移除，pool-4-thread-5线程继续执行
+2023-01-31 14:49:20 [pool-4-thread-1] INFO cn.programtalk.DistributedBarrierTest - 屏障被移除，pool-4-thread-1线程继续执行
+2023-01-31 14:49:21 [pool-4-thread-8] INFO cn.programtalk.DistributedBarrierTest - 屏障被移除，pool-4-thread-8线程继续执行
+2023-01-31 14:49:21 [pool-4-thread-10] INFO cn.programtalk.DistributedBarrierTest - 屏障被移除，pool-4-thread-10线程继续执行
+2023-01-31 14:49:21 [pool-4-thread-9] INFO cn.programtalk.DistributedBarrierTest - 屏障被移除，pool-4-thread-9线程继续执行
+2023-01-31 14:49:21 [pool-4-thread-3] INFO cn.programtalk.DistributedBarrierTest - 屏障被移除，pool-4-thread-3线程继续执行
+2023-01-31 14:49:21 [pool-4-thread-2] INFO cn.programtalk.DistributedBarrierTest - 屏障被移除，pool-4-thread-2线程继续执行
+```
+
+
+
+线程任务中设置了屏障，主线程等了5秒，之后解除了屏障，屏障解除后，所有线程继续执行后面的代码。
+
+## DistributedDoubleBarrier
+
+`DistributedDoubleBarrier`双重屏障能够让客户端在任务的开始和结束阶段更好的同步控制。 当有足够的任务已经进入到屏障后，一起开始，一旦任务完成则离开屏障。
+
+不同于`DistributedBarrier`，`DistributedDoubleBarrier`允许设置一个阈值数量（只是个阈值，不是个限制。），只有数目**大于等于**设置的这个阈值后才会继续执行，特别强调是**大于等于！！！**。
+
+
+
+### 创建屏障
+
+![image-20230131151209487](https://itlab1024-1256529903.cos.ap-beijing.myqcloud.com/202301311512631.png)
+
+
+
+### 进入屏障
+
+![image-20230131151310052](https://itlab1024-1256529903.cos.ap-beijing.myqcloud.com/202301311513180.png)
+
+
+
+### 离开屏障
+
+![image-20230131151330145](https://itlab1024-1256529903.cos.ap-beijing.myqcloud.com/202301311513257.png)
+
+
+
+### 代码示例
+
+```java
+package cn.programtalk;
+
+import lombok.extern.slf4j.Slf4j;
+import org.apache.curator.framework.CuratorFramework;
+import org.apache.curator.framework.CuratorFrameworkFactory;
+import org.apache.curator.framework.recipes.barriers.DistributedBarrier;
+import org.apache.curator.framework.recipes.barriers.DistributedDoubleBarrier;
+import org.apache.curator.retry.RetryForever;
+import org.junit.jupiter.api.Test;
+
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+
+@Slf4j
+public class DistributedDoubleBarrierTest {
+    @Test
+    public void testDistributedDoubleBarrier() {
+        CuratorFramework curatorFramework = CuratorFrameworkFactory.newClient("172.24.246.68:2181", new RetryForever(1000));
+        curatorFramework.start();
+        ExecutorService executorService = Executors.newCachedThreadPool();
+        for (int i = 0; i < 10; i++) {
+            executorService.submit(() -> {
+                try {
+                    // 创建distributedDoubleBarrier
+                    DistributedDoubleBarrier distributedDoubleBarrier = new DistributedDoubleBarrier(curatorFramework, "/DistributedDoubleBarrier", 2);
+                    distributedDoubleBarrier.enter();
+                    String threadName = Thread.currentThread().getName();
+                    log.info("{}进入障碍", threadName);
+                    log.info("{}执行具体业务逻辑", threadName);
+                    distributedDoubleBarrier.leave();
+                    log.info("{}离开障碍", threadName);
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            });
+        }
+        while (true){
+
+        }
+    }
+}
+```
+
+运行结果：
+
+```java
+2023-01-31 15:18:26 [pool-1-thread-10] INFO cn.programtalk.DistributedDoubleBarrierTest - pool-1-thread-10进入障碍
+2023-01-31 15:18:26 [pool-1-thread-4] INFO cn.programtalk.DistributedDoubleBarrierTest - pool-1-thread-4进入障碍
+2023-01-31 15:18:26 [pool-1-thread-7] INFO cn.programtalk.DistributedDoubleBarrierTest - pool-1-thread-7进入障碍
+2023-01-31 15:18:26 [pool-1-thread-2] INFO cn.programtalk.DistributedDoubleBarrierTest - pool-1-thread-2进入障碍
+2023-01-31 15:18:26 [pool-1-thread-6] INFO cn.programtalk.DistributedDoubleBarrierTest - pool-1-thread-6进入障碍
+2023-01-31 15:18:26 [pool-1-thread-1] INFO cn.programtalk.DistributedDoubleBarrierTest - pool-1-thread-1进入障碍
+2023-01-31 15:18:26 [pool-1-thread-5] INFO cn.programtalk.DistributedDoubleBarrierTest - pool-1-thread-5进入障碍
+2023-01-31 15:18:26 [pool-1-thread-1] INFO cn.programtalk.DistributedDoubleBarrierTest - pool-1-thread-1执行具体业务逻辑
+2023-01-31 15:18:26 [pool-1-thread-8] INFO cn.programtalk.DistributedDoubleBarrierTest - pool-1-thread-8进入障碍
+2023-01-31 15:18:26 [pool-1-thread-3] INFO cn.programtalk.DistributedDoubleBarrierTest - pool-1-thread-3进入障碍
+2023-01-31 15:18:26 [pool-1-thread-8] INFO cn.programtalk.DistributedDoubleBarrierTest - pool-1-thread-8执行具体业务逻辑
+2023-01-31 15:18:26 [pool-1-thread-9] INFO cn.programtalk.DistributedDoubleBarrierTest - pool-1-thread-9进入障碍
+2023-01-31 15:18:26 [pool-1-thread-3] INFO cn.programtalk.DistributedDoubleBarrierTest - pool-1-thread-3执行具体业务逻辑
+2023-01-31 15:18:26 [pool-1-thread-9] INFO cn.programtalk.DistributedDoubleBarrierTest - pool-1-thread-9执行具体业务逻辑
+2023-01-31 15:18:26 [pool-1-thread-5] INFO cn.programtalk.DistributedDoubleBarrierTest - pool-1-thread-5执行具体业务逻辑
+2023-01-31 15:18:26 [pool-1-thread-6] INFO cn.programtalk.DistributedDoubleBarrierTest - pool-1-thread-6执行具体业务逻辑
+2023-01-31 15:18:26 [pool-1-thread-2] INFO cn.programtalk.DistributedDoubleBarrierTest - pool-1-thread-2执行具体业务逻辑
+2023-01-31 15:18:26 [pool-1-thread-7] INFO cn.programtalk.DistributedDoubleBarrierTest - pool-1-thread-7执行具体业务逻辑
+2023-01-31 15:18:26 [pool-1-thread-4] INFO cn.programtalk.DistributedDoubleBarrierTest - pool-1-thread-4执行具体业务逻辑
+2023-01-31 15:18:26 [pool-1-thread-10] INFO cn.programtalk.DistributedDoubleBarrierTest - pool-1-thread-10执行具体业务逻辑
+2023-01-31 15:18:27 [pool-1-thread-2] INFO cn.programtalk.DistributedDoubleBarrierTest - pool-1-thread-2离开障碍
+2023-01-31 15:18:27 [pool-1-thread-9] INFO cn.programtalk.DistributedDoubleBarrierTest - pool-1-thread-9离开障碍
+2023-01-31 15:18:27 [pool-1-thread-7] INFO cn.programtalk.DistributedDoubleBarrierTest - pool-1-thread-7离开障碍
+2023-01-31 15:18:27 [pool-1-thread-6] INFO cn.programtalk.DistributedDoubleBarrierTest - pool-1-thread-6离开障碍
+2023-01-31 15:18:27 [pool-1-thread-3] INFO cn.programtalk.DistributedDoubleBarrierTest - pool-1-thread-3离开障碍
+2023-01-31 15:18:27 [pool-1-thread-4] INFO cn.programtalk.DistributedDoubleBarrierTest - pool-1-thread-4离开障碍
+2023-01-31 15:18:27 [pool-1-thread-5] INFO cn.programtalk.DistributedDoubleBarrierTest - pool-1-thread-5离开障碍
+2023-01-31 15:18:27 [pool-1-thread-10] INFO cn.programtalk.DistributedDoubleBarrierTest - pool-1-thread-10离开障碍
+2023-01-31 15:18:27 [pool-1-thread-8] INFO cn.programtalk.DistributedDoubleBarrierTest - pool-1-thread-8离开障碍
+2023-01-31 15:18:27 [pool-1-thread-1] INFO cn.programtalk.DistributedDoubleBarrierTest - pool-1-thread-1离开障碍
+```
+
+
+
+没有问题！
+
+或许有人会觉得有问题！可能会觉得10个线程为什么都进入屏障了？不是设置的2个吗？如果你是这样想的那就错了，因为构造器中第三个参数`memberQty`，只是个阈值，并不是限制，超过这个设置依然可以进入屏障的，相反如果达不到这个阈值，就不会进入屏障。
+
+代码修改下（我将for循环的数由原来的10改为1），则会一直阻塞（因为线程数量一致达不到2）：
+
+![image-20230131152458857](https://itlab1024-1256529903.cos.ap-beijing.myqcloud.com/202301311524965.png)
 
 
 
