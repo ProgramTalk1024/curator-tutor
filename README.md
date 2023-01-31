@@ -2411,5 +2411,139 @@ public class DistributedDoubleBarrierTest {
 
 
 
+# 选举
+
+## LeaderLatch
+
+### 基本说明
+
+![image-20230131153845931](https://itlab1024-1256529903.cos.ap-beijing.myqcloud.com/202301311538074.png)
+
+
+
+最全的构造方法如下：
+
+![image-20230131154423749](https://itlab1024-1256529903.cos.ap-beijing.myqcloud.com/202301311544909.png)
+
+
+
+主要有四个参数：
+
+`client`：zookeeper客户端实例。
+
+`latchPath`：Leader选举根节点路径。
+
+`id`：客户端id，用来标记客户端，即客户端编号、名称。
+
+`closeMode`：Latch关闭策略，SILENT-关闭时不触发监听器回调，NOTIFY_LEADER-关闭时触发监听器回调方法，默认不触发。
+
+### 代码示例
+
+```java
+package cn.programtalk;
+
+import lombok.extern.slf4j.Slf4j;
+import org.apache.curator.framework.CuratorFramework;
+import org.apache.curator.framework.CuratorFrameworkFactory;
+import org.apache.curator.framework.recipes.leader.LeaderLatch;
+import org.apache.curator.framework.recipes.leader.LeaderLatchListener;
+import org.apache.curator.retry.ExponentialBackoffRetry;
+import org.junit.jupiter.api.Test;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.*;
+
+@Slf4j
+public class LeaderLatchTest {
+    @Test
+    public void testLeaderLatch() throws Exception {
+
+        // 包装10个CuratorFramework客户端和LeaderLatch
+        List<LeaderLatch> leaderLatches = new ArrayList<>();
+        List<CuratorFramework> curatorFrameworks = new ArrayList<>();
+        for (int i = 0; i < 10; i++) {
+            CuratorFramework curatorFramework = CuratorFrameworkFactory.newClient("172.24.246.68:2181", new ExponentialBackoffRetry(1000, 3));
+            curatorFramework.start();
+            curatorFrameworks.add(curatorFramework);
+
+            LeaderLatch leaderLatch = new LeaderLatch(curatorFramework, "/LeaderLatch", "node-" + i, LeaderLatch.CloseMode.NOTIFY_LEADER);
+            leaderLatch.addListener(new LeaderLatchListener() {
+                @Override
+                public void isLeader() {
+                    log.info("isLeader callback : {} is Leader ", leaderLatch.getId());
+                }
+
+                @Override
+                public void notLeader() {
+                    log.info("notLeader callback : {} is not Leader ", leaderLatch.getId());
+                }
+            });
+            leaderLatches.add(leaderLatch);
+        }
+
+        // LeaderLatch启动
+        for (LeaderLatch latch : leaderLatches) {
+            new Thread(() -> {
+                try {
+                    latch.start();
+                    latch.await();
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+                log.info("{} 选举完成!", latch.getId());
+            }).start();
+        }
+
+        // 睡眠一段时间等待选举完成。
+        TimeUnit.SECONDS.sleep(30);
+        // 查看状态
+        for (LeaderLatch latch : leaderLatches) {
+            log.info("id={}, isLeader={}", latch.getId(), latch.hasLeadership());
+            if (latch.hasLeadership()) {
+                latch.close();
+            }
+        }
+        // 关闭客户端
+        for (CuratorFramework client : curatorFrameworks) {
+            client.close();
+        }
+        while (true) {
+
+        }
+    }
+}
+```
+
+运行结果：
+
+```text
+2023-01-31 17:53:54 [main-EventThread] INFO cn.programtalk.LeaderLatchTest - isLeader callback : node-2 is Leader 
+2023-01-31 17:53:54 [Thread-2] INFO cn.programtalk.LeaderLatchTest - node-2 选举完成!
+2023-01-31 17:54:06 [main] INFO cn.programtalk.LeaderLatchTest - id=node-0, isLeader=false
+2023-01-31 17:54:06 [main] INFO cn.programtalk.LeaderLatchTest - id=node-1, isLeader=false
+2023-01-31 17:54:06 [main] INFO cn.programtalk.LeaderLatchTest - id=node-2, isLeader=true
+2023-01-31 17:54:06 [main] INFO cn.programtalk.LeaderLatchTest - notLeader callback : node-2 is not Leader 
+2023-01-31 17:54:06 [main] INFO cn.programtalk.LeaderLatchTest - id=node-3, isLeader=false
+2023-01-31 17:54:06 [main] INFO cn.programtalk.LeaderLatchTest - id=node-4, isLeader=false
+2023-01-31 17:54:06 [main] INFO cn.programtalk.LeaderLatchTest - id=node-5, isLeader=false
+2023-01-31 17:54:06 [main] INFO cn.programtalk.LeaderLatchTest - id=node-6, isLeader=false
+2023-01-31 17:54:06 [main] INFO cn.programtalk.LeaderLatchTest - id=node-7, isLeader=false
+2023-01-31 17:54:06 [main] INFO cn.programtalk.LeaderLatchTest - id=node-8, isLeader=false
+2023-01-31 17:54:06 [main] INFO cn.programtalk.LeaderLatchTest - id=node-9, isLeader=false
+2023-01-31 17:54:06 [main-EventThread] INFO cn.programtalk.LeaderLatchTest - isLeader callback : node-3 is Leader 
+2023-01-31 17:54:06 [Thread-3] INFO cn.programtalk.LeaderLatchTest - node-3 选举完成!
+2023-01-31 17:54:06 [main-EventThread] INFO cn.programtalk.LeaderLatchTest - isLeader callback : node-5 is Leader 
+2023-01-31 17:54:06 [Thread-5] INFO cn.programtalk.LeaderLatchTest - node-5 选举完成!
+2023-01-31 17:54:06 [main-EventThread] INFO cn.programtalk.LeaderLatchTest - isLeader callback : node-8 is Leader 
+2023-01-31 17:54:06 [Thread-8] INFO cn.programtalk.LeaderLatchTest - node-8 选举完成!
+2023-01-31 17:54:07 [main-EventThread] INFO cn.programtalk.LeaderLatchTest - isLeader callback : node-9 is Leader 
+2023-01-31 17:54:07 [Thread-9] INFO cn.programtalk.LeaderLatchTest - node-9 选举完成!
+```
+
+
+
+
+
 
 > Github：<font color="green">https://github.com/ProgramTalk1024/curator-tutor</font>
