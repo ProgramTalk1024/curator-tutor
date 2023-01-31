@@ -2063,7 +2063,7 @@ public InterProcessSemaphoreV2(CuratorFramework client, String path, SharedCount
 
 **`SharedCountReader类型构造方法`**
 
-![ShareCountReader](https://itlab1024-1256529903.cos.ap-beijing.myqcloud.com/202301311109990.png)
+![ShareCountReader](https://itlab1024-1256529903.cos.ap-beijing.myqcloud.com/202301311117836.png)
 
 
 
