@@ -2417,6 +2417,8 @@ public class DistributedDoubleBarrierTest {
 
 `LeaderLatch`方式就是以一种抢占方式来决定选主，是一种非公平的领导选举，谁抢到就是谁，会随机从候选者中选择一台作为`leader`， 选中后除非`leader`自己 调用`close()`释放`leadership`，否则其他的候选者不能成为`leader`。
 
+`LeaderLatch`是不公平的，它随机选择节点作为`Leader`！
+
 ### 基本说明
 
 ![image-20230131153845931](https://itlab1024-1256529903.cos.ap-beijing.myqcloud.com/202301311538074.png)
@@ -2585,7 +2587,165 @@ public class LeaderLatchTest {
 
 `Leader Election`同`Leader Latch`一样都是用于选举，与`Leader latch`不同的是这种方法可以对领导权进行控制，在适当的时候释放领导权，这样每个节点都有可能获得领导权。
 
-利用Curator中InterProcessMutex分布式锁进行抢主，抢到锁的即为Leader。
+利用`Curator`中`InterProcessMutex`分布式锁进行抢主，抢到锁的即为`Leader`。
+
+所以`LeaderLatch`是公平的，它是根据请求顺序公平选举`Leader`节点。
+
+### 代码示例
+
+```
+package cn.programtalk;
+
+import lombok.SneakyThrows;
+import lombok.extern.slf4j.Slf4j;
+import org.apache.curator.framework.CuratorFramework;
+import org.apache.curator.framework.CuratorFrameworkFactory;
+import org.apache.curator.framework.recipes.leader.LeaderSelector;
+import org.apache.curator.framework.recipes.leader.LeaderSelectorListenerAdapter;
+import org.apache.curator.retry.ExponentialBackoffRetry;
+import org.apache.curator.utils.CloseableUtils;
+import org.junit.jupiter.api.Test;
+
+import java.io.Closeable;
+import java.util.concurrent.CountDownLatch;
+
+@Slf4j
+public class LeaderSelectorTest {
+    @SneakyThrows
+    @Test
+    public void testLeaderSelector() {
+        CuratorFramework curatorFramework = null;
+        MyLeaderSelectorListener listener = null;
+        try {
+            curatorFramework = CuratorFrameworkFactory.newClient("172.24.246.68:2181", new ExponentialBackoffRetry(1000, 3));
+            curatorFramework.start();
+
+            String name = "client-" + System.currentTimeMillis();
+            log.info("节点名称={}", name);
+            listener = new MyLeaderSelectorListener(curatorFramework, "/LeaderSelector", name);
+            listener.start();
+
+            while (true) {
+
+            }
+        } finally {
+            CloseableUtils.closeQuietly(listener);
+            CloseableUtils.closeQuietly(curatorFramework);
+        }
+    }
+
+    /**
+     * IMPORTANT: The recommended action for receiving SUSPENDED or LOST is to throw CancelLeadershipException. This will cause the LeaderSelector instance to attempt to interrupt and cancel the thread that is executing the takeLeadership method. Because this is so important, you should consider extending LeaderSelectorListenerAdapter. LeaderSelectorListenerAdapter has the recommended handling already written for you.
+     */
+    @Slf4j
+    static class MyLeaderSelectorListener extends LeaderSelectorListenerAdapter implements Closeable {
+        private final String name;
+        private final LeaderSelector leaderSelector;
+
+        // 用于控制takeLeadership方法不返回（一直阻塞）
+        private static final CountDownLatch LATCH = new CountDownLatch(1);
+
+        public MyLeaderSelectorListener(CuratorFramework curatorFramework, String path, String name) {
+            this.name = name;
+            // 所有节点选举必须是同一个path
+            leaderSelector = new LeaderSelector(curatorFramework, path, this);
+            // 设置leaderSelector的存储Id
+            leaderSelector.setId(name);
+            // 放弃领导权时重新排队
+            leaderSelector.autoRequeue();
+        }
+
+        public void start() throws Exception {
+            // 异步的
+            leaderSelector.start();
+        }
+
+        @Override
+        public void close() {
+            leaderSelector.close();
+        }
+
+        @Override
+        public void takeLeadership(CuratorFramework client) throws Exception {
+            log.info("{} 成为Leader", name);
+            // 控制该方法不返回，如果返回则释放了Leader, 不管你用什么代码实现，只要方法不返回，该leader就不会释放。 特别重要一定要注意！！！
+            LATCH.await();
+        }
+    }
+}
+```
+
+
+
+同样按照`LeaderLatch`所说的三个步骤那样测试!
+
+
+
+---
+
+
+
+**第一步**
+
+![image-20230201182402936](https://itlab1024-1256529903.cos.ap-beijing.myqcloud.com/202302011824091.png)
+
+
+
+从图上日志可知，节点`client-1675246896513`已经被选为了`Leader`。
+
+
+
+---
+
+
+
+**第二步**
+
+![image-20230201182511064](https://itlab1024-1256529903.cos.ap-beijing.myqcloud.com/202302011825226.png)
+
+
+
+从图上日志可知，节点`client-1675246927380`没有被选为`Leader`!
+
+
+
+---
+
+
+
+**第三步**
+
+关闭`Leader`节点`client-1675246896513`对应的进程。看看节点`client-1675246927380`能否自动被选为`Leader`节点。
+
+**稍微等一小会，需要一点点时间。。。。。**
+
+![image-20230201182828598](https://itlab1024-1256529903.cos.ap-beijing.myqcloud.com/202302011828713.png)
+
+
+
+确实变为了`Leader`!
+
+
+
+### 特别说明
+
+> 监听器可以使用匿名方式创建，但是不建议，强烈推荐使用自定义类，要继承`LeaderSelectorListenerAdapter`类，为什么呢？框架已经对`SUSPENDED` 或者`LOST`状态已经做了预处理，抛出了`CancelLeadershipException`异常，`LeaderSelector`会尝试中断和取消正在执行 `takeLeadership` 方法的线程，因为这非常重要，所以开发人员应该考虑扩展 `LeaderSelectorListenerAdapter`。`LeaderSelectorListenerAdapter` 已经为我们编写了一些推荐的处理。
+>
+> 可选地实现`Closeable`接口。
+>
+> 
+>
+> `takeLeadership`是个特别重要的方法，被选为`Leader`的时候会调用，被触发后，如果不想弃用该`Leader`则一定要阻塞，不能返回（返回 Void也是返回哦）！！！
+
+
+
+---
+
+
+
+**接下来会写`Curator Async`和`Service Discovery`**的内容！！！
+
+
 
 
 
