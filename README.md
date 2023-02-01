@@ -2743,7 +2743,7 @@ public class LeaderSelectorTest {
 
 
 
-**接下来会写`Curator Async`和`Service Discovery`**的内容！！！
+** 接下来会写`Curator Async`和`Service Discovery` **的内容！！！
 
 
 
