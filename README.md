@@ -2415,6 +2415,8 @@ public class DistributedDoubleBarrierTest {
 
 ## LeaderLatch
 
+`LeaderLatch`方式就是以一种抢占方式来决定选主，是一种非公平的领导选举，谁抢到就是谁，会随机从候选者中选择一台作为`leader`， 选中后除非`leader`自己 调用`close()`释放`leadership`，否则其他的候选者不能成为`leader`。
+
 ### 基本说明
 
 ![image-20230131153845931](https://itlab1024-1256529903.cos.ap-beijing.myqcloud.com/202301311538074.png)
@@ -2437,11 +2439,20 @@ public class DistributedDoubleBarrierTest {
 
 `closeMode`：Latch关闭策略，SILENT-关闭时不触发监听器回调，NOTIFY_LEADER-关闭时触发监听器回调方法，默认不触发。
 
+
+
+使用说明：
+
+使用`LeaderLatch`，首先必须使用`leaderLatch.start();`方法启动，一旦启动，`LeaderLatch`会和其它使用相同`latch path`的其它`LeaderLatch`交涉，然后随机的选择其中一个作为`leader`。
+
+一旦不使用`LeaderLatch`了，必须调用close方法。如果它是`leader`,会释放`leadership`，其它的参与者将会选举一个`leader`。
+
 ### 代码示例
 
 ```java
 package cn.programtalk;
 
+import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.curator.framework.CuratorFramework;
 import org.apache.curator.framework.CuratorFrameworkFactory;
@@ -2450,96 +2461,131 @@ import org.apache.curator.framework.recipes.leader.LeaderLatchListener;
 import org.apache.curator.retry.ExponentialBackoffRetry;
 import org.junit.jupiter.api.Test;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.concurrent.*;
-
 @Slf4j
 public class LeaderLatchTest {
     @Test
     public void testLeaderLatch() throws Exception {
-
-        // 包装10个CuratorFramework客户端和LeaderLatch
-        List<LeaderLatch> leaderLatches = new ArrayList<>();
-        List<CuratorFramework> curatorFrameworks = new ArrayList<>();
-        for (int i = 0; i < 10; i++) {
-            CuratorFramework curatorFramework = CuratorFrameworkFactory.newClient("172.24.246.68:2181", new ExponentialBackoffRetry(1000, 3));
-            curatorFramework.start();
-            curatorFrameworks.add(curatorFramework);
-
-            LeaderLatch leaderLatch = new LeaderLatch(curatorFramework, "/LeaderLatch", "node-" + i, LeaderLatch.CloseMode.NOTIFY_LEADER);
-            leaderLatch.addListener(new LeaderLatchListener() {
-                @Override
-                public void isLeader() {
-                    log.info("isLeader callback : {} is Leader ", leaderLatch.getId());
-                }
-
-                @Override
-                public void notLeader() {
-                    log.info("notLeader callback : {} is not Leader ", leaderLatch.getId());
-                }
-            });
-            leaderLatches.add(leaderLatch);
-        }
-
-        // LeaderLatch启动
-        for (LeaderLatch latch : leaderLatches) {
-            new Thread(() -> {
-                try {
-                    latch.start();
-                    latch.await();
-                } catch (Exception e) {
-                    e.printStackTrace();
-                }
-                log.info("{} 选举完成!", latch.getId());
-            }).start();
-        }
-
-        // 睡眠一段时间等待选举完成。
-        TimeUnit.SECONDS.sleep(30);
-        // 查看状态
-        for (LeaderLatch latch : leaderLatches) {
-            log.info("id={}, isLeader={}", latch.getId(), latch.hasLeadership());
-            if (latch.hasLeadership()) {
-                latch.close();
+        CuratorFramework curatorFramework = CuratorFrameworkFactory.newClient("172.24.246.68:2181", new ExponentialBackoffRetry(1000, 3));
+        curatorFramework.start();
+        LeaderLatch leaderLatch = new LeaderLatch(curatorFramework, "/LeaderLatch", "node-" + System.currentTimeMillis(), LeaderLatch.CloseMode.NOTIFY_LEADER);
+        leaderLatch.addListener(new LeaderLatchListener() {
+            /**
+             * 当 LeaderLatch 的状态从 hasLeadership = false 变为 hasLeadership = true 时，将调用此值。
+             * 请注意，当此方法调用发生时，hasLeadership 可能已回退到 false。如果发生这种情况，notLeader() 也会被调用。
+             */
+            @SneakyThrows
+            @Override
+            public void isLeader() {
+                log.info("isLeader callback : {} is Leader ", leaderLatch.getId());
             }
-        }
-        // 关闭客户端
-        for (CuratorFramework client : curatorFrameworks) {
-            client.close();
-        }
+
+            /**
+             * 当 LeaderLatch 的状态从 hasLeadership = true 变为 hasLeadership = false 时，将调用此值。
+             * 请注意，当此方法调用发生时，hasLeadership 可能已经变为真。如果发生这种情况，isLeader() 也会被调用。
+             */
+            @SneakyThrows
+            @Override
+            public void notLeader() {
+                log.info("notLeader callback : {} is not Leader ", leaderLatch.getId());
+            }
+        });
+        leaderLatch.start();
+        leaderLatch.await();
+        log.info("{} 只有leader才会执行 ", leaderLatch.getId());
+
         while (true) {
 
         }
     }
+
 }
 ```
 
-运行结果：
 
-```text
-2023-01-31 17:53:54 [main-EventThread] INFO cn.programtalk.LeaderLatchTest - isLeader callback : node-2 is Leader 
-2023-01-31 17:53:54 [Thread-2] INFO cn.programtalk.LeaderLatchTest - node-2 选举完成!
-2023-01-31 17:54:06 [main] INFO cn.programtalk.LeaderLatchTest - id=node-0, isLeader=false
-2023-01-31 17:54:06 [main] INFO cn.programtalk.LeaderLatchTest - id=node-1, isLeader=false
-2023-01-31 17:54:06 [main] INFO cn.programtalk.LeaderLatchTest - id=node-2, isLeader=true
-2023-01-31 17:54:06 [main] INFO cn.programtalk.LeaderLatchTest - notLeader callback : node-2 is not Leader 
-2023-01-31 17:54:06 [main] INFO cn.programtalk.LeaderLatchTest - id=node-3, isLeader=false
-2023-01-31 17:54:06 [main] INFO cn.programtalk.LeaderLatchTest - id=node-4, isLeader=false
-2023-01-31 17:54:06 [main] INFO cn.programtalk.LeaderLatchTest - id=node-5, isLeader=false
-2023-01-31 17:54:06 [main] INFO cn.programtalk.LeaderLatchTest - id=node-6, isLeader=false
-2023-01-31 17:54:06 [main] INFO cn.programtalk.LeaderLatchTest - id=node-7, isLeader=false
-2023-01-31 17:54:06 [main] INFO cn.programtalk.LeaderLatchTest - id=node-8, isLeader=false
-2023-01-31 17:54:06 [main] INFO cn.programtalk.LeaderLatchTest - id=node-9, isLeader=false
-2023-01-31 17:54:06 [main-EventThread] INFO cn.programtalk.LeaderLatchTest - isLeader callback : node-3 is Leader 
-2023-01-31 17:54:06 [Thread-3] INFO cn.programtalk.LeaderLatchTest - node-3 选举完成!
-2023-01-31 17:54:06 [main-EventThread] INFO cn.programtalk.LeaderLatchTest - isLeader callback : node-5 is Leader 
-2023-01-31 17:54:06 [Thread-5] INFO cn.programtalk.LeaderLatchTest - node-5 选举完成!
-2023-01-31 17:54:06 [main-EventThread] INFO cn.programtalk.LeaderLatchTest - isLeader callback : node-8 is Leader 
-2023-01-31 17:54:06 [Thread-8] INFO cn.programtalk.LeaderLatchTest - node-8 选举完成!
-2023-01-31 17:54:07 [main-EventThread] INFO cn.programtalk.LeaderLatchTest - isLeader callback : node-9 is Leader 
-2023-01-31 17:54:07 [Thread-9] INFO cn.programtalk.LeaderLatchTest - node-9 选举完成!
-```
+
+> 很多人喜欢使用多线程来模拟，诚然这确实没有问题，但是我觉得多线程模拟不容易理解，并且还需要写很多`非正常逻辑代码`来实现，这里依然使用多客户端（多JVM）来实现，还是通过IDEA多实例来运行。
+
+
+
+---
+
+**接下来运行代码来测试下~**
+
+**第一步**
+
+启动`testLeaderLatch`（我叫他为`节点1`），IDEA控制台会输出如下信息：
+
+![image-20230201143202348](https://itlab1024-1256529903.cos.ap-beijing.myqcloud.com/202302011432586.png)
+
+
+
+此时就一个节点，那肯定就选择这个节点做为主节点。
+
+看下zk中的临时节点：
+
+![image-20230201143257956](https://itlab1024-1256529903.cos.ap-beijing.myqcloud.com/202302011432074.png)
+
+可以看到确实有一个节点。
+
+
+
+---
+
+
+
+**第二步**
+
+再次启动`testLeaderLatch`（我叫他为`节点2`，这是一个新实例。
+
+![image-20230201143533306](https://itlab1024-1256529903.cos.ap-beijing.myqcloud.com/202302011435505.png)
+
+
+
+可以看到控制太不会输出，从代码可以只，我只打印了`isLeader`回调，因为第一步已经选出了`leader`，所以此时不会回调`isLeader`。另外`await`后的代码有只有在节点被选中为`leader`才会执行，所以没有输出。
+
+
+
+此时再看下zk中的信息：
+
+![image-20230201143806206](https://itlab1024-1256529903.cos.ap-beijing.myqcloud.com/202302011438316.png)
+
+
+
+确实有两个节点。
+
+
+
+---
+
+
+
+**第三步**
+
+经过上面两步，可以知道`节点1`是`Leader`，`节点2`是`Follower`。那么如果我将`Leader`节点会话关闭（可以直接关闭进程），那么`节点2`是否会被选中为`Leader`呢？接下来测试下。
+
+按照下图说明关闭`第一步`的进程。
+
+![image-20230201144132419](https://itlab1024-1256529903.cos.ap-beijing.myqcloud.com/202302011441541.png)
+
+
+
+接下来打开`节点2`的控制台，一小会后，会发现打印如下日志：
+
+![image-20230201144550913](https://itlab1024-1256529903.cos.ap-beijing.myqcloud.com/202302011445124.png)
+
+
+
+由上图可知`节点2`被自动选为了`Leader`。
+
+
+
+## Leader Election
+
+### 基本说明
+
+`Leader Election`同`Leader Latch`一样都是用于选举，与`Leader latch`不同的是这种方法可以对领导权进行控制，在适当的时候释放领导权，这样每个节点都有可能获得领导权。
+
+利用Curator中InterProcessMutex分布式锁进行抢主，抢到锁的即为Leader。
 
 
 
