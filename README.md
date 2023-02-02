@@ -3032,17 +3032,13 @@ public class ServiceDiscoveryTest {
 
 `Service Discovery Server`主要是为了为其他语言提供的，它公开 RESTful Web 服务以注册、删除、查询等服务。它需要配置`Tomcat`、`Jetty`等容器运行。
 
-## Maven依赖
-
-```xml
- <dependency>
-     <groupId>org.apache.curator</groupId>
-     <artifactId>curator-x-discovery-server</artifactId>
-     <version>5.4.0</version>
-</dependency>
-```
 
 
+[Spring Boot实现服务发现服务器](https://github.com/ProgramTalk1024/curator-service-discovery-server.githttps://itlab1024.com/archives/208.html)
+
+
+
+[Apache Curator Framework教程（二）Spring Boot实现服务发现服务器 ](https://itlab1024.com/archives/208.html)
 
 
 
