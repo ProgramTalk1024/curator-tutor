@@ -1,6 +1,6 @@
 ![](https://itlab1024-1256529903.cos.ap-beijing.myqcloud.com/202301251143816.png)
 
-# Apache Curator Framework框架学习
+# Apache Curator Framework教程
 Apache Curator 是 Apache ZooKeeper（分布式协调服务）的 Java/JVM 客户端库。它包括一个高级API框架和实用程序，使使用Apache ZooKeeper变得更加容易和可靠。
 
 ![](https://itlab1024-1256529903.cos.ap-beijing.myqcloud.com/202301131005419.png)
@@ -2743,7 +2743,304 @@ public class LeaderSelectorTest {
 
 
 
-**接下来会写`Curator Async`和`Service Discovery`的内容！！！**
+**接下来会写`Curator Async`和`Service Discovery`**的内容！！！
+
+
+
+# Curator Async
+
+`Curator Async` 是一个 `DSL(Domain-Specific Language)，它包装了现有的 `CuratorFramework` `实例。这个DSL是完全异步的.
+
+`Curator Async` 使用`Java Lambda Expressions`风格，更加自然和易用。实际上它是基于JDK8后新增的`CompletedFuture` 和`CompletionStage`。如果不了解着两个需要先学习下。否则是没办法使用`Curator Async`的。
+
+## Maven依赖
+
+```xml
+<dependency>
+    <groupId>org.apache.curator</groupId>
+    <artifactId>curator-x-async</artifactId>
+    <version>5.4.0</version>
+</dependency>
+```
+
+
+
+## 使用说明
+
+**创建一个持久有序节点，并且监听该节点，监听器中打印节点的值。**
+
+```
+package cn.programtalk;
+
+import lombok.extern.slf4j.Slf4j;
+import org.apache.curator.framework.CuratorFramework;
+import org.apache.curator.framework.CuratorFrameworkFactory;
+import org.apache.curator.retry.ExponentialBackoffRetry;
+import org.apache.curator.x.async.AsyncCuratorFramework;
+import org.apache.curator.x.async.modeled.ModelSpec;
+import org.apache.curator.x.async.modeled.ModeledFramework;
+import org.junit.jupiter.api.Test;
+
+import java.util.concurrent.CompletableFuture;
+
+import static org.apache.zookeeper.CreateMode.PERSISTENT_SEQUENTIAL;
+
+@Slf4j
+public class CuratorAsyncTest {
+    /**
+     * 创建节点，并监听
+     */
+    @Test
+    public void testAsyncCreate1() {
+        CuratorFramework curatorFramework = CuratorFrameworkFactory.newClient("172.29.240.53:2181", new ExponentialBackoffRetry(1000, 3));
+        curatorFramework.start();
+        // 将CuratorFramework转化为AsyncCuratorFramework
+        AsyncCuratorFramework asyncCuratorFramework = AsyncCuratorFramework.wrap(curatorFramework);
+        // 以下功能是创建一个持久有序节点，并且监听该节点，监听器中打印节点的值。
+        asyncCuratorFramework.create().withMode(PERSISTENT_SEQUENTIAL).forPath("/async").thenAccept(actualPath -> {
+            asyncCuratorFramework.watched().getData().forPath(actualPath).thenApply((bytes) -> {
+                String x = new String(bytes);
+                System.out.println(x); // 10.112.33.229
+                return x;
+            });
+        });
+        while (true) {
+
+        }
+    }
+}
+```
+
+
+
+# 服务发现（Service Discovery）
+
+
+
+## Maven依赖
+
+```xml
+<dependency>
+    <groupId>org.apache.curator</groupId>
+    <artifactId>curator-x-discovery</artifactId>
+    <version>5.4.0</version>
+</dependency>
+```
+
+## 三个策略
+
+![image-20230202135444877](https://itlab1024-1256529903.cos.ap-beijing.myqcloud.com/202302021354057.png)
+
+`RoundRobin`：轮询
+
+`Random`：随机
+
+`Sticky`：粘性 （总是选择同一个）
+
+## 代码示例
+
+```java
+package cn.programtalk;
+
+import lombok.Data;
+import lombok.extern.slf4j.Slf4j;
+import org.apache.curator.framework.CuratorFramework;
+import org.apache.curator.framework.CuratorFrameworkFactory;
+import org.apache.curator.retry.ExponentialBackoffRetry;
+import org.apache.curator.x.discovery.*;
+import org.apache.curator.x.discovery.details.JsonInstanceSerializer;
+import org.apache.curator.x.discovery.strategies.RoundRobinStrategy;
+import org.junit.jupiter.api.Test;
+
+import java.io.Serializable;
+import java.util.Collection;
+import java.util.Random;
+
+@Slf4j
+public class ServiceDiscoveryTest {
+    /**
+     * 实例元数据类
+     */
+    @Data
+    static class InstanceMetadata implements Serializable {
+        private String url;
+        private String name;
+
+        @Override
+        public String toString() {
+            return "InstanceMetadata{" +
+                    "url='" + url + '\'' +
+                    ", name='" + name + '\'' +
+                    '}';
+        }
+    }
+
+    /**
+     * 服务注册，模拟三个服务
+     *
+     * @throws Exception
+     */
+    @Test
+    public void testRegisterService() throws Exception {
+        CuratorFramework curatorFramework = CuratorFrameworkFactory.newClient("172.29.240.53:2181", new ExponentialBackoffRetry(1000, 3));
+        curatorFramework.start();
+        // 未成功连接Zk前一直阻塞
+        curatorFramework.blockUntilConnected();
+        Random random = new Random();
+        InstanceMetadata instanceMetadata = new InstanceMetadata();
+        instanceMetadata.setUrl(random.nextInt(1000) + "");
+        instanceMetadata.setName("产品服务");
+        // 定义ServiceDiscovery
+        ServiceDiscovery<InstanceMetadata> serviceDiscovery = ServiceDiscoveryBuilder.builder(InstanceMetadata.class)
+                // zk路径
+                .basePath("/base-path")
+                // zk客户端
+                .client(curatorFramework)
+                //.thisInstance(serviceInstance)
+                // 是否监听实例
+                .watchInstances(true)
+                // 序列化
+                .serializer(new JsonInstanceSerializer<>(InstanceMetadata.class))
+                .build();
+        // 一个服务（产品服务）, 有三个节点。
+        // 服务名称
+        String serviceName = "PRODUCT";
+        for (int i = 0; i < 3; i++) {
+            String address = "127.0.0.1";
+            String id = address + ":" + serviceName + ":" + i;
+            ServiceInstance<InstanceMetadata> serviceInstance = ServiceInstance.<InstanceMetadata>builder()
+                    // IP或者域名地址
+                    .address(address)
+                    // 实例载体，就是path的值
+                    .payload(instanceMetadata)
+                    // 实例Id
+                    .id(id)
+                    // 端口，仅仅是模拟，不要管是否是合法端口
+                    .port(i)
+                    // SSL端口
+                    .sslPort(i)
+                    // 服务名称
+                    .name(serviceName)
+                    // 统一资源标识符
+                    .uriSpec(new UriSpec("{scheme}://{address}:{port}"))
+                    // 构建方法
+                    .build();
+            serviceDiscovery.registerService(serviceInstance);
+        }
+        // 启动（必须）
+        serviceDiscovery.start();
+        while (true) {
+
+        }
+    }
+
+    /**
+     * 消费者，获取服务
+     *
+     * @throws Exception
+     */
+    @Test
+    public void testGetService() throws Exception {
+        CuratorFramework curatorFramework = CuratorFrameworkFactory.newClient("172.29.240.53:2181", new ExponentialBackoffRetry(1000, 3));
+        curatorFramework.start();
+        // 未成功连接Zk前一直阻塞
+        curatorFramework.blockUntilConnected();
+
+        // 定义ServiceDiscovery
+        ServiceDiscovery<InstanceMetadata> serviceDiscovery = ServiceDiscoveryBuilder.builder(InstanceMetadata.class)
+                // zk路径
+                .basePath("/base-path")
+                // zk客户端
+                .client(curatorFramework)
+                // 是否监听实例
+                .watchInstances(true)
+                // 序列化
+                .serializer(new JsonInstanceSerializer<>(InstanceMetadata.class))
+                .build();
+        // 服务名
+        String serviceName = "PRODUCT";
+        ServiceProvider<InstanceMetadata> serviceProvider = serviceDiscovery.serviceProviderBuilder().serviceName(serviceName)
+                .providerStrategy(new RoundRobinStrategy<>())
+                .build();
+        serviceProvider.start();
+        //根据名称获取服务
+        log.info("获取PRODUCT的所有实例：");
+        Collection<ServiceInstance<InstanceMetadata>> instances = serviceProvider.getAllInstances();
+        for (ServiceInstance<InstanceMetadata> instance : instances) {
+            log.info("服务名称={}，服务类型={}， 服务id={}， 载体={}， 端口={}， SSL端口={}, 地址={}， 注册时间={}", instance.getName()
+                    , instance.getServiceType(), instance.getId(), instance.getPayload(), instance.getPort()
+                    , instance.getSslPort(), instance.getAddress(), instance.getRegistrationTimeUTC());
+        }
+        log.info("获取PRODUCT的单个实例（根据serviceProvider的策略）：");
+        ServiceInstance<InstanceMetadata> instance = serviceProvider.getInstance();
+        log.info("服务名称={}，服务类型={}， 服务id={}， 载体={}， 端口={}， SSL端口={}, 地址={}， 注册时间={}", instance.getName()
+                , instance.getServiceType(), instance.getId(), instance.getPayload(), instance.getPort()
+                , instance.getSslPort(), instance.getAddress(), instance.getRegistrationTimeUTC());
+
+    }
+}
+```
+
+主要有两个
+
+
+
+---
+
+
+
+测试方法`testRegisterService`是注册服务，`testGetService`是获取服务。
+
+**开始测试**
+
+**第一步**
+
+运行`testRegisterService`，该测试会一个产品服务（名字叫做`PRODUCT`）,该服务有三个节点（分布式部署）。
+
+启动完毕后，通过zk命令行查看下path。
+
+![image-20230202140957805](https://itlab1024-1256529903.cos.ap-beijing.myqcloud.com/202302021409914.png)
+
+一个`PRODUCT`服务的三个实例已经成功写入。
+
+
+
+---
+
+
+
+**第二步**
+
+运行`testGetService`方法，运行结果如下：
+
+```text
+获取PRODUCT的所有实例：
+服务名称=PRODUCT，服务类型=DYNAMIC， 服务id=127.0.0.1:PRODUCT:2， 载体=InstanceMetadata{url='364', name='产品服务'}， 端口=2， SSL端口=2, 地址=127.0.0.1， 注册时间=1675318097379
+服务名称=PRODUCT，服务类型=DYNAMIC， 服务id=127.0.0.1:PRODUCT:0， 载体=InstanceMetadata{url='364', name='产品服务'}， 端口=0， SSL端口=0, 地址=127.0.0.1， 注册时间=1675318097079
+服务名称=PRODUCT，服务类型=DYNAMIC， 服务id=127.0.0.1:PRODUCT:1， 载体=InstanceMetadata{url='364', name='产品服务'}， 端口=1， SSL端口=1, 地址=127.0.0.1， 注册时间=1675318097328
+
+获取PRODUCT的单个实例（根据serviceProvider的策略）：
+服务名称=PRODUCT，服务类型=DYNAMIC， 服务id=127.0.0.1:PRODUCT:2， 载体=InstanceMetadata{url='364', name='产品服务'}， 端口=2， SSL端口=2, 地址=127.0.0.1， 注册时间=1675318097379
+
+```
+
+可以看到获取单个实例返回的是`服务id=127.0.0.1:PRODUCT:2`。当然着不绝对，根据设置的负载均衡策略有关（ServiceProvider中设置）。
+
+
+
+# 服务发现服务器（Service Discovery Server）
+
+`Service Discovery Server`主要是为了为其他语言提供的，它公开 RESTful Web 服务以注册、删除、查询等服务。它需要配置`Tomcat`、`Jetty`等容器运行。
+
+## Maven依赖
+
+```xml
+ <dependency>
+     <groupId>org.apache.curator</groupId>
+     <artifactId>curator-x-discovery-server</artifactId>
+     <version>5.4.0</version>
+</dependency>
+```
 
 
 
