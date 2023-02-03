@@ -67,7 +67,7 @@ pom文件
 curator主要通过工厂类`CuratorFrameworkFactory`的`newClient`方法创建连接
 ![](https://itlab1024-1256529903.cos.ap-beijing.myqcloud.com/202301111300623.png)
 有三种多态方法。
-```text
+```java
 public static CuratorFramework newClient(String connectString, int sessionTimeoutMs, int connectionTimeoutMs, RetryPolicy retryPolicy, ZKClientConfig zkClientConfig)
 public static CuratorFramework newClient(String connectString, int sessionTimeoutMs, int connectionTimeoutMs, RetryPolicy retryPolicy)
 public static CuratorFramework newClient(String connectString, RetryPolicy retryPolicy)
@@ -628,7 +628,7 @@ public void testDelete2() throws Exception {
 
 使用`checkExists()`搭配`forPath`来实现，返回一个`Stat`对象信息。
 
-```
+```java
 package cn.programtalk.connection;
 
 import org.apache.curator.RetryPolicy;
@@ -923,27 +923,27 @@ public class CacheTest {
 
 * `CuratorFrameworkFactory`这是简单的静态工厂类，用于创建连接zk的客户端（client），里面提供了`newClient`的多态方法，也可以使用`builder`建造者模式类创建客户端。
 
-  ```java
-  String connectString = "localhost:2181";
-  RetryPolicy retryPolicy = new ExponentialBackoffRetry(1000, 3);
-  // 使用newClient方法
-  CuratorFramework curatorFramework = CuratorFrameworkFactory.newClient(connectString, retryPolicy);
-  // 也可以使用静态builder()方法
-  CuratorFramework curatorFramework2 = CuratorFrameworkFactory.builder().connectString(connectString).retryPolicy(retryPolicy).build();
-  ```
+```java
+String connectString = "localhost:2181";
+RetryPolicy retryPolicy = new ExponentialBackoffRetry(1000, 3);
+// 使用newClient方法
+CuratorFramework curatorFramework = CuratorFrameworkFactory.newClient(connectString, retryPolicy);
+// 也可以使用静态builder()方法
+CuratorFramework curatorFramework2 = CuratorFrameworkFactory.builder().connectString(connectString).retryPolicy(retryPolicy).build();
+```
 
 * `CuratorCache`类，该类也有提供builder方法
 
-  ```java
-  CuratorCache curatorCache = CuratorCache.builder(curatorFramework, "/ns1").build();
-  ```
+```java
+CuratorCache curatorCache = CuratorCache.builder(curatorFramework, "/ns1").build();
+```
 
-  也提供了build方法，可以像下面这样使用。
+也提供了build方法，可以像下面这样使用。
 
-  ```java
-  CuratorCache curatorCache = CuratorCache.builder(curatorFramework, "/ns1").build();
-          curatorCache= CuratorCache.build(curatorFramework, "/ns1", CuratorCache.Options.SINGLE_NODE_CACHE, CuratorCache.Options.COMPRESSED_DATA, CuratorCache.Options.DO_NOT_CLEAR_ON_CLOSE);
-  ```
+```java
+CuratorCache curatorCache = CuratorCache.builder(curatorFramework, "/ns1").build();
+        curatorCache= CuratorCache.build(curatorFramework, "/ns1", CuratorCache.Options.SINGLE_NODE_CACHE, CuratorCache.Options.COMPRESSED_DATA, CuratorCache.Options.DO_NOT_CLEAR_ON_CLOSE);
+```
 
   
 
@@ -1965,7 +1965,7 @@ public void testWrite() throws Exception {
 
 `InterProcessMultiLock(CuratorFramework, List<String>)`创造的是一个`InterProcessMutex`的锁。
 
-```
+```java
 package cn.programtalk;
 
 import lombok.extern.slf4j.Slf4j;
@@ -2366,7 +2366,7 @@ public class DistributedDoubleBarrierTest {
 
 运行结果：
 
-```java
+```text
 2023-01-31 15:18:26 [pool-1-thread-10] INFO cn.programtalk.DistributedDoubleBarrierTest - pool-1-thread-10进入障碍
 2023-01-31 15:18:26 [pool-1-thread-4] INFO cn.programtalk.DistributedDoubleBarrierTest - pool-1-thread-4进入障碍
 2023-01-31 15:18:26 [pool-1-thread-7] INFO cn.programtalk.DistributedDoubleBarrierTest - pool-1-thread-7进入障碍
