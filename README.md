@@ -3034,7 +3034,7 @@ public class ServiceDiscoveryTest {
 
 
 
-[Spring Boot实现服务发现服务器](https://github.com/ProgramTalk1024/curator-service-discovery-server.githttps://itlab1024.com/archives/208.html)
+[Spring Boot实现服务发现服务器](https://github.com/ProgramTalk1024/curator-service-discovery-server.git)
 
 
 
