@@ -15,6 +15,7 @@ curator 有很多的依赖，比如如下是maven依赖官方说明
 一般情况下只要引入`curator-recipes`基本就够用。他包含了`client`和`framework`的依赖，会自动下载下来。
 ![](https://itlab1024-1256529903.cos.ap-beijing.myqcloud.com/202301111131555.png)
 # 创建项目并引入依赖
+
 pom文件
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
